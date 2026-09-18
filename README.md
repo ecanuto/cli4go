@@ -49,7 +49,7 @@ func main() {
 		},
 	}
 
-	cmd, err := prg.DefaultParse()	
+	err := prg.DefaultParse()	
 	if errors.Is(err, cli.ErrExit) { // -h/--help and -v/--version
 		os.Exit(0)
 	}
