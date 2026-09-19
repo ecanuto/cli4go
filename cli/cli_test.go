@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"os"
@@ -568,4 +569,25 @@ func TestValidateDefaultType(t *testing.T) {
 
 // --- Usage, Help, Version output ---------------------------------------------
 
-// TODO ...
+func TestVersionString(t *testing.T) {
+	c := Command{Name: "myprogram", Version: "0.1.0"}
+	if got, want := c.VersionString(), "myprogram 0.1.0"; got != want {
+		t.Errorf("VersionString() = %q, want %q", got, want)
+	}
+
+	c = Command{Name: "myprogram"}
+	if got, want := c.VersionString(), "myprogram "; got != want {
+		t.Errorf("VersionString() = %q, want %q", got, want)
+	}
+}
+
+func TestPrintVersion(t *testing.T) {
+	var buf bytes.Buffer
+	c := &Command{Name: "myprogram", Version: "0.1.0", Stdout: &buf}
+
+	c.PrintVersion()
+
+	if got, want := buf.String(), "myprogram 0.1.0\n"; got != want {
+		t.Errorf("PrintVersion() wrote %q, want %q", got, want)
+	}
+}
