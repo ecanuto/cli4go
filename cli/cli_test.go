@@ -305,6 +305,49 @@ func TestStderr(t *testing.T) {
 	}
 }
 
+// --- Flag/Long normalization -------------------------------------------------
+
+func TestNormalizeFlag(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "", want: ""},
+		{input: "f", want: "-f"},
+		{input: "-f", want: "-f"},
+		{input: "--f", want: "-f"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := normalizeFlag(tt.input); got != tt.want {
+				t.Errorf("normalizeFlag(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeLong(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "", want: ""},
+		{input: "bar", want: "--bar"},
+		{input: "-bar", want: "--bar"},
+		{input: "--bar", want: "--bar"},
+		{input: "---bar", want: "--bar"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := normalizeLong(tt.input); got != tt.want {
+				t.Errorf("normalizeLong(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Validate ----------------------------------------------------------------
 
 func TestValidate(t *testing.T) {
@@ -365,6 +408,103 @@ func TestValidate(t *testing.T) {
 				Name: "myprogram",
 				Arguments: []Argument{
 					{Name: "qux", Dest: StringVar(&s), Default: 42},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid, option with Flag only",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "f"}},
+			},
+		},
+		{
+			name: "valid, option with Long only",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Long: "foo"}},
+			},
+		},
+		{
+			name: "valid, option with Flag and Long",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "f", Long: "foo"}},
+			},
+		},
+		{
+			name: "option missing both Flag and Long",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "option Flag longer than one character",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "-ab"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "option Flag with only dashes",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "--"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate option flag, same spelling",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "f"},
+					{Flag: "f"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate option flag, different spelling normalizes the same",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "f"},
+					{Flag: "-f"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate option long, different spelling normalizes the same",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Long: "bar"},
+					{Long: "--bar"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Option Default matches Dest type",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "f", Dest: StringVar(&s), Default: "bar"},
+				},
+			},
+		},
+		{
+			name: "Option Default mismatches Dest type",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "f", Dest: StringVar(&s), Default: 42},
 				},
 			},
 			wantErr: true,

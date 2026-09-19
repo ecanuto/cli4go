@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Value is implemented by anything that can be set from a single
@@ -301,6 +302,30 @@ func (c *Command) stderr() io.Writer {
 	return os.Stderr
 }
 
+// --- Flag/Long normalization -------------------------------------------------
+
+// normalizeFlag reshapes s into a canonical short flag form by
+// stripping any leading dashes and prepending exactly one. "f", "-f",
+// and "--f" all normalize to "-f". Idempotent on an already-normalized
+// or empty s.
+func normalizeFlag(s string) string {
+	if s == "" {
+		return s
+	}
+	return "-" + strings.TrimLeft(s, "-")
+}
+
+// normalizeLong reshapes s into a canonical long flag form by
+// stripping any leading dashes and prepending exactly two. "bar",
+// "-bar", "--bar", and "---bar" all normalize to "--bar". Idempotent
+// on an already-normalized or empty s.
+func normalizeLong(s string) string {
+	if s == "" {
+		return s
+	}
+	return "--" + strings.TrimLeft(s, "-")
+}
+
 // --- Validate ----------------------------------------------------------------
 
 // Validate checks the Command definition for structural problems (e.g.
@@ -345,6 +370,59 @@ func (c *Command) Validate() error {
 		// expects -- otherwise it would only fail at Parse time, or
 		// silently misbehave for custom Value implementations.
 		if err := validateDefaultType(arg.Dest, arg.Default); err != nil {
+			return err
+		}
+	}
+
+	seenFlag := make(map[string]bool, len(c.Options))
+	seenLong := make(map[string]bool, len(c.Options))
+	for _, opt := range c.Options {
+		// Compare Flag/Long in their normalized form, so "-f"/"f" or
+		// "--bar"/"bar" on two different Options are correctly treated
+		// as the same form instead of slipping past the uniqueness
+		// checks below as if they were different.
+		flag := normalizeFlag(opt.Flag)
+		long := normalizeLong(opt.Long)
+
+		// An Option needs at least one of Flag/Long to be reachable from
+		// the command line at all.
+		if flag == "" && long == "" {
+			return errors.New("cli: Option must set Flag and/or Long")
+		}
+
+		if flag != "" {
+			// The short form's fixed length ("-x") is what lets help
+			// output use a constant-width Flag column instead of
+			// computing one per Command. This also rejects a Flag with
+			// nothing but dashes (e.g. "--"), which normalizes to just
+			// "-" (length 1).
+			if len(flag) != 2 {
+				return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", opt.Flag)
+			}
+
+			// Flag must be unique across Options -- Parse looks up an
+			// incoming "-x" token by its normalized form in a map built
+			// from these same Flags, so a duplicate would mean the
+			// second Option silently shadows the first.
+			if seenFlag[flag] {
+				return fmt.Errorf("cli: duplicate option flag form %q", flag)
+			}
+			seenFlag[flag] = true
+		}
+
+		if long != "" {
+			// Same reasoning as Flag above: Parse looks up an incoming
+			// "--xxx" token by its normalized form, so Long must be
+			// unique across Options too.
+			if seenLong[long] {
+				return fmt.Errorf("cli: duplicate option long form %q", long)
+			}
+			seenLong[long] = true
+		}
+
+		// Same Default/Dest type check as Arguments above -- see that
+		// comment for why.
+		if err := validateDefaultType(opt.Dest, opt.Default); err != nil {
 			return err
 		}
 	}
