@@ -102,43 +102,73 @@ func isBoolFlag(v Value) bool {
 	return ok && bf.IsBoolFlag()
 }
 
-// --- Sentinel errors ---------------------------------------------------------
+// --- Errors ------------------------------------------------------------------
 
-// ErrExit is the shared classification for the built-in actions Parse
-// handles on its own (help/version already printed). Callers that don't
-// care which one fired can check errors.Is(err, ErrExit) instead of
-// testing ErrHelp/ErrVersion individually.
-var ErrExit = errors.New("cli: exit requested")
-
-// sentinelError is a Parse sentinel that also classifies as parent via
-// errors.Is, without implying parent is its underlying cause -- hence
-// Is instead of Unwrap: this is a category membership, not a wrap. See
-// ErrHelp/ErrVersion.
-type sentinelError struct {
-	msg    string
-	parent error
+// Error is returned by Parse and DefaultParse. It behaves like a normal
+// error (Error() string), but always also reports an ExitCode, so a
+// caller's main() can be a single line:
+//
+//	if err := prg.DefaultParse(); err != nil {
+//	    os.Exit(err.ExitCode())
+//	}
+//
+// Error is a concrete type, not an interface: Parse only ever builds one
+// kind of failure value, so there is no abstraction to gain from a
+// separate interface, and returning *Error directly (instead of the
+// built-in error) means a nil check is a plain pointer comparison, with
+// no typed-nil-in-interface pitfall to worry about.
+type Error struct {
+	msg  string
+	code int
 }
 
-func (e *sentinelError) Error() string { return e.msg }
+// newError builds a dynamic-message Error for a given exit code (1 for a
+// Validate failure, 2 for a real parsing/usage error).
+func newError(code int, format string, args ...any) *Error {
+	return &Error{msg: fmt.Sprintf(format, args...), code: code}
+}
 
-// Is reports whether target is this sentinel's parent classification.
-// Implemented explicitly (rather than via Unwrap) because ErrExit isn't
-// the "real error underneath" ErrHelp/ErrVersion -- it's a shared tag,
-// nothing is actually wrapped. This keeps errors.Unwrap(ErrHelp) == nil
-// (accurate: there is no underlying error) while still making
-// errors.Is(ErrHelp, ErrExit) true.
-func (e *sentinelError) Is(target error) bool { return target == e.parent }
+func (e *Error) Error() string { return e.msg }
+
+// ExitCode reports the process exit code appropriate for this failure:
+//
+//	0 -- a built-in action fired (-h/--help or -v/--version); the text
+//	     has already been printed to Stdout.
+//	1 -- Command.Validate() failed: the Command itself was declared
+//	     incorrectly (duplicate flag, empty Name, a Default that
+//	     doesn't match its Dest's type, ...) -- a bug in the caller's
+//	     Go code, not something the end user mistyped on the command
+//	     line.
+//	2 -- a real parsing/usage error (unknown option, missing value,
+//	     invalid value, unexpected positional argument, a bad Env
+//	     value) -- matches the getopt/argparse convention of using 2
+//	     specifically for command-line usage errors.
+func (e *Error) ExitCode() int { return e.code }
+
+// Is lets errors.Is(err, ErrExit) keep working: an Error classifies as
+// ErrExit only when its ExitCode is 0 (i.e. only ErrHelp/ErrVersion).
+// The e.code == 0 guard matters -- without it, a real parsing/usage
+// error or a Validate failure would also incorrectly satisfy
+// errors.Is(err, ErrExit), since Is would then only be checking which
+// error was asked for, not which instance it's being called on.
+func (e *Error) Is(target error) bool { return e.code == 0 && target == ErrExit }
 
 var (
+	// ErrExit is the shared classification for the built-in actions Parse
+	// handles on its own (help/version already printed). Callers that
+	// don't care which one fired can check errors.Is(err, ErrExit) instead
+	// of comparing against ErrHelp/ErrVersion individually.
+	ErrExit = errors.New("cli: exit requested")
+
 	// ErrHelp is returned by Parse when -h/--help was requested. The
 	// full help text has already been printed via PrintHelp;
-	// errors.Is(err, ErrExit) is also true.
-	ErrHelp = &sentinelError{msg: "cli: help requested", parent: ErrExit}
+	// errors.Is(err, ErrExit) is also true, and ErrHelp.ExitCode() is 0.
+	ErrHelp = &Error{msg: "cli: help requested", code: 0}
 
 	// ErrVersion is returned by Parse when -v/--version was requested.
-	// The version string has already been printed; errors.Is(err, ErrExit)
-	// is also true.
-	ErrVersion = &sentinelError{msg: "cli: version requested", parent: ErrExit}
+	// The version string has already been printed; errors.Is(err,
+	// ErrExit) is also true, and ErrVersion.ExitCode() is 0.
+	ErrVersion = &Error{msg: "cli: version requested", code: 0}
 )
 
 // --- Argument, Option, Command -----------------------------------------------
@@ -285,7 +315,8 @@ func (c *Command) stderr() io.Writer {
 // Dest's type, ...) -- a bug in the caller's Go code, not something an
 // end user mistyped on the command line -- so there's no sensible "try
 // --help" advice to attach to it, unlike a real parsing error (see the
-// Parse doc comment).
+// Parse doc comment). Parse wraps a Validate failure into an *Error with
+// ExitCode() == 1.
 func (c *Command) Validate() error {
 	if c.Name == "" {
 		return errors.New("cli: Command.Name must not be empty")
@@ -302,36 +333,34 @@ func (c *Command) Validate() error {
 // Command.Version is set) -- neither is declared in Command.Options by
 // the developer.
 //
-// Parse returns (cmd, err) where:
-//   - cmd == nil and errors.Is(err, ErrExit): a built-in action
-//     (-h/--help or -v/--version) was triggered; PrintHelp/PrintVersion
-//     already wrote the full text to c.Stdout. Use errors.Is(err,
+// Parse returns:
+//   - nil: parsing succeeded.
+//   - ErrHelp / ErrVersion (ExitCode() == 0): a built-in action fired;
+//     PrintHelp/PrintVersion already wrote the full text to c.Stdout.
+//     errors.Is(err, ErrExit) is also true for both; use errors.Is(err,
 //     ErrHelp) / errors.Is(err, ErrVersion) to tell which one fired, if
 //     that matters.
-//   - cmd != nil and err == nil: parsing succeeded. cmd is p itself --
-//     there is currently no subcommand routing, so this is always the
-//     receiver (see the Command doc comment for what's planned there).
-//   - err != nil and not errors.Is(err, ErrExit): a real parsing error
-//     (an unknown or invalid option/argument, including a bad Env
-//     value) or a Validate failure.
+//   - a Validate failure (ExitCode() == 1): the Command itself was
+//     declared incorrectly -- see the Validate doc comment. Nothing is
+//     printed.
+//   - a real parsing/usage error (ExitCode() == 2): an unknown or
+//     invalid option/argument, including a bad Env value. Parse prints
+//     a clap-style block to c.Stderr before returning (see below).
 //
-// For a real parsing error, Parse also prints a clap-style block to
-// c.Stderr before returning:
+// For a real parsing/usage error, Parse prints:
 //
 //	error: <message>
 //	Usage: myprogram [options] [qux]
 //
 //	For more information, try '--help'.
 //
-// The "error: " prefix is display-only -- the error value Parse returns
-// is never prefixed with it, so errors.Is/errors.As and any caller-side
-// wrapping keep working against the bare message (e.g. `unknown option
-// "--nope"`).
-//
-// A Validate failure prints nothing -- see the Validate doc comment.
-func (c *Command) Parse(args []string) error {
+// The "error: " prefix is display-only -- the message returned by
+// Error() is never prefixed with it, so errors.Is/errors.As and any
+// caller-side wrapping keep working against the bare message (e.g.
+// `unknown option "--nope"`).
+func (c *Command) Parse(args []string) *Error {
 	if err := c.Validate(); err != nil {
-		return err
+		return newError(1, "%s", err)
 	}
 
 	return nil
@@ -341,7 +370,7 @@ func (c *Command) Parse(args []string) error {
 // os.Args[1:] -- the common case for a program's main(). Use Parse
 // directly (with an explicit slice) when testing, or when args come
 // from somewhere other than the running process's own command line.
-func (c *Command) DefaultParse() error {
+func (c *Command) DefaultParse() *Error {
 	return c.Parse(os.Args[1:])
 }
 

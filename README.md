@@ -49,12 +49,9 @@ func main() {
 		},
 	}
 
-	err := prg.DefaultParse()	
-	if errors.Is(err, cli.ErrExit) { // -h/--help and -v/--version
-		os.Exit(0)
-	}
-	if err != nil {
-		os.Exit(1)
+	err := prg.DefaultParse()
+	if err := prg.DefaultParse(); err != nil {
+		os.Exit(err.ExitCode())
 	}
 
 	fmt.Printf("%s: foo=%v bar=%q qux=%q\n", cmd.Name, cfg.Foo, cfg.Bar, cfg.Qux)
