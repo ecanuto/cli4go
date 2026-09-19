@@ -318,9 +318,65 @@ func (c *Command) stderr() io.Writer {
 // Parse doc comment). Parse wraps a Validate failure into an *Error with
 // ExitCode() == 1.
 func (c *Command) Validate() error {
+	// Command.Name is required -- it's used in usage/help/version output.
 	if c.Name == "" {
 		return errors.New("cli: Command.Name must not be empty")
 	}
+
+	seenArgNames := make(map[string]bool, len(c.Arguments))
+	for _, arg := range c.Arguments {
+		// Every Argument needs a display name -- it's what shows up in
+		// the usage line (e.g. "[qux]") and the Arguments: help section.
+		if arg.Name == "" {
+			return errors.New("cli: Argument.Name must not be empty")
+		}
+
+		// Argument names must be unique -- Parse fills positional
+		// Arguments in declaration order, so a duplicate name would be
+		// ambiguous in help output even though parsing itself doesn't
+		// use Name as a lookup key.
+		if seenArgNames[arg.Name] {
+			return fmt.Errorf("cli: duplicate argument name %q", arg.Name)
+		}
+		seenArgNames[arg.Name] = true
+
+		// If both Dest and Default are set, Default's concrete type must
+		// match what Dest's constructor (StringVar/BoolVar/IntVar)
+		// expects -- otherwise it would only fail at Parse time, or
+		// silently misbehave for custom Value implementations.
+		if err := validateDefaultType(arg.Dest, arg.Default); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// validateDefaultType checks that def, when set, matches the Go type
+// expected by dest's constructor (StringVar -> string, BoolVar -> bool,
+// IntVar -> int). Custom Value implementations -- ones not created by
+// cli4go's own constructors -- are not checked here, since cli4go has
+// no way to know what type they expect.
+func validateDefaultType(dest Value, def any) error {
+	if dest == nil || def == nil {
+		return nil
+	}
+
+	switch dest.(type) {
+	case *stringValue:
+		if _, ok := def.(string); !ok {
+			return fmt.Errorf("cli: Default %v (%T) is not a string, but Dest is bound via StringVar", def, def)
+		}
+	case *boolValue:
+		if _, ok := def.(bool); !ok {
+			return fmt.Errorf("cli: Default %v (%T) is not a bool, but Dest is bound via BoolVar", def, def)
+		}
+	case *intValue:
+		if _, ok := def.(int); !ok {
+			return fmt.Errorf("cli: Default %v (%T) is not an int, but Dest is bound via IntVar", def, def)
+		}
+	}
+
 	return nil
 }
 

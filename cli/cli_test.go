@@ -307,7 +307,120 @@ func TestStderr(t *testing.T) {
 
 // --- Validate ----------------------------------------------------------------
 
-// TODO ...
+func TestValidate(t *testing.T) {
+	var s string
+
+	tests := []struct {
+		name    string
+		cmd     Command
+		wantErr bool
+	}{
+		{
+			name: "valid, no arguments",
+			cmd:  Command{Name: "myprogram"},
+		},
+		{
+			name:    "empty Command.Name",
+			cmd:     Command{},
+			wantErr: true,
+		},
+		{
+			name: "valid, one argument",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Dest: StringVar(&s)}},
+			},
+		},
+		{
+			name: "empty Argument.Name",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: ""}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate Argument.Name",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux"},
+					{Name: "qux"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Argument Default matches Dest type",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux", Dest: StringVar(&s), Default: "bar"},
+				},
+			},
+		},
+		{
+			name: "Argument Default mismatches Dest type",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux", Dest: StringVar(&s), Default: 42},
+				},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// customValue is a minimal Value implementation used to verify that
+// validateDefaultType skips anything other than the three built-in
+// concrete types (stringValue/boolValue/intValue) it knows how to check.
+type customValue struct{}
+
+func (customValue) String() string   { return "" }
+func (customValue) Set(string) error { return nil }
+
+func TestValidateDefaultType(t *testing.T) {
+	var s string
+	var b bool
+	var i int
+
+	tests := []struct {
+		name    string
+		dest    Value
+		def     any
+		wantErr bool
+	}{
+		{name: "nil dest, nil default", dest: nil, def: nil},
+		{name: "nil dest, non-nil default", dest: nil, def: "foo"},
+		{name: "StringVar, nil default", dest: StringVar(&s), def: nil},
+		{name: "StringVar, matching default", dest: StringVar(&s), def: "foo"},
+		{name: "StringVar, mismatched default", dest: StringVar(&s), def: 42, wantErr: true},
+		{name: "BoolVar, matching default", dest: BoolVar(&b), def: true},
+		{name: "BoolVar, mismatched default", dest: BoolVar(&b), def: "true", wantErr: true},
+		{name: "IntVar, matching default", dest: IntVar(&i), def: 7},
+		{name: "IntVar, mismatched default", dest: IntVar(&i), def: "7", wantErr: true},
+		{name: "custom Value implementation, any default", dest: customValue{}, def: 123},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateDefaultType(tt.dest, tt.def)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateDefaultType(%v, %v) error = %v, wantErr %v", tt.dest, tt.def, err, tt.wantErr)
+			}
+		})
+	}
+}
 
 // --- Parse -------------------------------------------------------------------
 
