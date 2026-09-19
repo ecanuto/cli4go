@@ -565,7 +565,35 @@ func TestValidateDefaultType(t *testing.T) {
 
 // --- Parse -------------------------------------------------------------------
 
-// TODO ...
+// TestDefaultParse only exercises the DefaultParse -> Parse -> Validate
+// wiring (one success, one Validate failure) using os.Args directly.
+// Everything else Parse will eventually do -- consuming flags,
+// positional Arguments, Env values -- is Parse's own behavior, not
+// something specific to DefaultParse, so those cases belong in
+// TestParse, not here.
+func TestDefaultParse(t *testing.T) {
+	// os.Args is global process state; save and restore it so this test
+	// doesn't leak into other tests or a real `go test` invocation's own
+	// arguments.
+	origArgs := os.Args
+	t.Cleanup(func() { os.Args = origArgs })
+
+	os.Args = []string{"myprogram"}
+	c := &Command{Name: "myprogram"}
+	if err := c.DefaultParse(); err != nil {
+		t.Errorf("DefaultParse() = %v, want nil", err)
+	}
+
+	os.Args = []string{"myprogram"}
+	c = &Command{} // empty Name -> Validate fails
+	err := c.DefaultParse()
+	if err == nil {
+		t.Fatal("DefaultParse() = nil, want error")
+	}
+	if got, want := err.ExitCode(), 1; got != want {
+		t.Errorf("DefaultParse() ExitCode() = %d, want %d", got, want)
+	}
+}
 
 // --- Usage, Help, Version output ---------------------------------------------
 
