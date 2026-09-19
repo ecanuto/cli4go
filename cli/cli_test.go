@@ -618,6 +618,73 @@ func TestDefaultParse(t *testing.T) {
 
 // --- Usage, Help, Version output ---------------------------------------------
 
+func TestUsageString(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  Command
+		want string
+	}{
+		{
+			name: "no arguments",
+			cmd:  Command{Name: "myprogram"},
+			want: "Usage: myprogram [options]\n",
+		},
+		{
+			name: "one argument",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux"}},
+			},
+			want: "Usage: myprogram [options] [qux]\n",
+		},
+		{
+			name: "multiple arguments, declaration order",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux"},
+					{Name: "quux"},
+				},
+			},
+			want: "Usage: myprogram [options] [qux] [quux]\n",
+		},
+		{
+			// Options never affects the usage line beyond the constant
+			// "[options]" token -- individual flags are only spelled
+			// out in HelpString's "Options:" section.
+			name: "options declared, still just \"[options]\"",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "f"}, {Long: "bar"}},
+			},
+			want: "Usage: myprogram [options]\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cmd.UsageString(); got != tt.want {
+				t.Errorf("UsageString() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestPrintUsage(t *testing.T) {
+	var buf bytes.Buffer
+	c := &Command{
+		Name:      "myprogram",
+		Arguments: []Argument{{Name: "qux"}},
+		Stdout:    &buf,
+	}
+
+	c.PrintUsage()
+
+	if got, want := buf.String(), "Usage: myprogram [options] [qux]\n"; got != want {
+		t.Errorf("PrintUsage() wrote %q, want %q", got, want)
+	}
+}
+
 func TestVersionString(t *testing.T) {
 	c := Command{Name: "myprogram", Version: "0.1.0"}
 	if got, want := c.VersionString(), "myprogram 0.1.0"; got != want {

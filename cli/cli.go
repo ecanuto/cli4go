@@ -535,7 +535,16 @@ func (c *Command) DefaultParse() *Error {
 // with the Arguments / Options / Environment Variables sections -- see
 // HelpString.
 func (c *Command) UsageString() string {
-	return ""
+	// Build the "[arg1] [arg2] ..." part of the usage line from the
+	// Command's Arguments. Options are always represented by the
+	// "[options]" placeholder, so they don't need to be listed here.
+	var args strings.Builder
+	for _, arg := range c.Arguments {
+		fmt.Fprintf(&args, " [%s]", arg.Name)
+	}
+
+	// The usage line is always "Usage: <program name> [options] [arg1] [arg2] ..."
+	return fmt.Sprintf("Usage: %s [options]%s\n", c.Name, args.String())
 }
 
 // PrintUsage writes UsageString (the one-line usage summary) to c.Stdout
