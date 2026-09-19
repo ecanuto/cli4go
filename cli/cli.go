@@ -334,22 +334,47 @@ func normalizeLong(s string) string {
 // need to call it directly; it is exported mainly to allow validating a
 // Command early (e.g. in a test) without running Parse.
 //
-// A Validate failure never prints anything -- not even the short usage
-// line. It means the Command itself was declared incorrectly (a
-// duplicate flag, an empty Name, a Default that doesn't match its
-// Dest's type, ...) -- a bug in the caller's Go code, not something an
-// end user mistyped on the command line -- so there's no sensible "try
-// --help" advice to attach to it, unlike a real parsing error (see the
-// Parse doc comment). Parse wraps a Validate failure into an *Error with
-// ExitCode() == 1.
+// Checks, in order:
+//  1. Command.Name non-empty.
+//  2. Every Argument.Name non-empty and unique.
+//  3. Every Argument's Default (if set) type-matches its Dest's concrete
+//     type.
+//  4. Every Option has Flag and/or Long set.
+//  5. Normalized Flag is exactly 2 characters if set.
+//  6. Normalized Flag and Long are each unique across Options.
+//  7. Same Default/Dest type check as Arguments, for Options.
+//
+// A Validate failure never prints anything -- see the package-level
+// design notes for why (a Validate failure is a bug in the caller's Go
+// code, not something an end user mistyped).
 func (c *Command) Validate() error {
 	// Command.Name is required -- it's used in usage/help/version output.
+	// This check has nowhere else to live: it isn't part of either loop
+	// below, so it stays here rather than in a helper.
 	if c.Name == "" {
 		return errors.New("cli: Command.Name must not be empty")
 	}
 
-	seenArgNames := make(map[string]bool, len(c.Arguments))
-	for _, arg := range c.Arguments {
+	// Arguments validation
+	if err := validateArguments(c.Arguments); err != nil {
+		return err
+	}
+
+	// Options validation
+	if err := validateOptions(c.Options); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateArguments checks args for structural problems: an empty or
+// duplicate Name, or a Default whose type doesn't match Dest. It is a
+// free function (not a *Command method) so it stays decoupled from
+// Command and testable on its own, mirroring validateDefaultType below.
+func validateArguments(args []Argument) error {
+	seenNames := make(map[string]bool, len(args))
+	for _, arg := range args {
 		// Every Argument needs a display name -- it's what shows up in
 		// the usage line (e.g. "[qux]") and the Arguments: help section.
 		if arg.Name == "" {
@@ -360,23 +385,26 @@ func (c *Command) Validate() error {
 		// Arguments in declaration order, so a duplicate name would be
 		// ambiguous in help output even though parsing itself doesn't
 		// use Name as a lookup key.
-		if seenArgNames[arg.Name] {
+		if seenNames[arg.Name] {
 			return fmt.Errorf("cli: duplicate argument name %q", arg.Name)
 		}
-		seenArgNames[arg.Name] = true
+		seenNames[arg.Name] = true
 
-		// If both Dest and Default are set, Default's concrete type must
-		// match what Dest's constructor (StringVar/BoolVar/IntVar)
-		// expects -- otherwise it would only fail at Parse time, or
-		// silently misbehave for custom Value implementations.
 		if err := validateDefaultType(arg.Dest, arg.Default); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	seenFlag := make(map[string]bool, len(c.Options))
-	seenLong := make(map[string]bool, len(c.Options))
-	for _, opt := range c.Options {
+// validateOptions checks opts for structural problems: a missing
+// Flag/Long, a malformed Flag, a duplicate Flag/Long across Options, or
+// a Default whose type doesn't match Dest. Same free-function shape as
+// validateArguments, for the same reason.
+func validateOptions(opts []Option) error {
+	seenFlag := make(map[string]bool, len(opts))
+	seenLong := make(map[string]bool, len(opts))
+	for _, opt := range opts {
 		// Compare Flag/Long in their normalized form, so "-f"/"f" or
 		// "--bar"/"bar" on two different Options are correctly treated
 		// as the same form instead of slipping past the uniqueness
@@ -393,17 +421,10 @@ func (c *Command) Validate() error {
 		if flag != "" {
 			// The short form's fixed length ("-x") is what lets help
 			// output use a constant-width Flag column instead of
-			// computing one per Command. This also rejects a Flag with
-			// nothing but dashes (e.g. "--"), which normalizes to just
-			// "-" (length 1).
+			// computing one per Command.
 			if len(flag) != 2 {
 				return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", opt.Flag)
 			}
-
-			// Flag must be unique across Options -- Parse looks up an
-			// incoming "-x" token by its normalized form in a map built
-			// from these same Flags, so a duplicate would mean the
-			// second Option silently shadows the first.
 			if seenFlag[flag] {
 				return fmt.Errorf("cli: duplicate option flag form %q", flag)
 			}
@@ -420,13 +441,10 @@ func (c *Command) Validate() error {
 			seenLong[long] = true
 		}
 
-		// Same Default/Dest type check as Arguments above -- see that
-		// comment for why.
 		if err := validateDefaultType(opt.Dest, opt.Default); err != nil {
 			return err
 		}
 	}
-
 	return nil
 }
 

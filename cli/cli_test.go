@@ -351,16 +351,19 @@ func TestNormalizeLong(t *testing.T) {
 
 // --- Validate ----------------------------------------------------------------
 
+// TestValidate covers what belongs to Validate itself: the Command.Name
+// check (not part of either helper) and that a failure from either
+// helper propagates as Validate's own error. Detailed Argument/Option
+// edge cases live in TestValidateArguments and TestValidateOptions,
+// next to the functions they exercise.
 func TestValidate(t *testing.T) {
-	var s string
-
 	tests := []struct {
 		name    string
 		cmd     Command
 		wantErr bool
 	}{
 		{
-			name: "valid, no arguments",
+			name: "valid, empty Command",
 			cmd:  Command{Name: "myprogram"},
 		},
 		{
@@ -369,14 +372,7 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "valid, one argument",
-			cmd: Command{
-				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Dest: StringVar(&s)}},
-			},
-		},
-		{
-			name: "empty Argument.Name",
+			name: "propagates a validateArguments failure",
 			cmd: Command{
 				Name:      "myprogram",
 				Arguments: []Argument{{Name: ""}},
@@ -384,129 +380,10 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "duplicate Argument.Name",
-			cmd: Command{
-				Name: "myprogram",
-				Arguments: []Argument{
-					{Name: "qux"},
-					{Name: "qux"},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Argument Default matches Dest type",
-			cmd: Command{
-				Name: "myprogram",
-				Arguments: []Argument{
-					{Name: "qux", Dest: StringVar(&s), Default: "bar"},
-				},
-			},
-		},
-		{
-			name: "Argument Default mismatches Dest type",
-			cmd: Command{
-				Name: "myprogram",
-				Arguments: []Argument{
-					{Name: "qux", Dest: StringVar(&s), Default: 42},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "valid, option with Flag only",
-			cmd: Command{
-				Name:    "myprogram",
-				Options: []Option{{Flag: "f"}},
-			},
-		},
-		{
-			name: "valid, option with Long only",
-			cmd: Command{
-				Name:    "myprogram",
-				Options: []Option{{Long: "foo"}},
-			},
-		},
-		{
-			name: "valid, option with Flag and Long",
-			cmd: Command{
-				Name:    "myprogram",
-				Options: []Option{{Flag: "f", Long: "foo"}},
-			},
-		},
-		{
-			name: "option missing both Flag and Long",
+			name: "propagates a validateOptions failure",
 			cmd: Command{
 				Name:    "myprogram",
 				Options: []Option{{}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "option Flag longer than one character",
-			cmd: Command{
-				Name:    "myprogram",
-				Options: []Option{{Flag: "-ab"}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "option Flag with only dashes",
-			cmd: Command{
-				Name:    "myprogram",
-				Options: []Option{{Flag: "--"}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "duplicate option flag, same spelling",
-			cmd: Command{
-				Name: "myprogram",
-				Options: []Option{
-					{Flag: "f"},
-					{Flag: "f"},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "duplicate option flag, different spelling normalizes the same",
-			cmd: Command{
-				Name: "myprogram",
-				Options: []Option{
-					{Flag: "f"},
-					{Flag: "-f"},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "duplicate option long, different spelling normalizes the same",
-			cmd: Command{
-				Name: "myprogram",
-				Options: []Option{
-					{Long: "bar"},
-					{Long: "--bar"},
-				},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Option Default matches Dest type",
-			cmd: Command{
-				Name: "myprogram",
-				Options: []Option{
-					{Flag: "f", Dest: StringVar(&s), Default: "bar"},
-				},
-			},
-		},
-		{
-			name: "Option Default mismatches Dest type",
-			cmd: Command{
-				Name: "myprogram",
-				Options: []Option{
-					{Flag: "f", Dest: StringVar(&s), Default: 42},
-				},
 			},
 			wantErr: true,
 		},
@@ -517,6 +394,152 @@ func TestValidate(t *testing.T) {
 			err := tt.cmd.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateArguments exercises validateArguments directly, against a
+// bare []Argument, without needing a full Command wrapper.
+func TestValidateArguments(t *testing.T) {
+	var s string
+
+	tests := []struct {
+		name    string
+		args    []Argument
+		wantErr bool
+	}{
+		{
+			name: "no arguments",
+			args: nil,
+		},
+		{
+			name: "valid, one argument",
+			args: []Argument{{Name: "qux", Dest: StringVar(&s)}},
+		},
+		{
+			name:    "empty Argument.Name",
+			args:    []Argument{{Name: ""}},
+			wantErr: true,
+		},
+		{
+			name: "duplicate Argument.Name",
+			args: []Argument{
+				{Name: "qux"},
+				{Name: "qux"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Default matches Dest type",
+			args: []Argument{
+				{Name: "qux", Dest: StringVar(&s), Default: "bar"},
+			},
+		},
+		{
+			name: "Default mismatches Dest type",
+			args: []Argument{
+				{Name: "qux", Dest: StringVar(&s), Default: 42},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateArguments(tt.args)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateArguments() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateOptions exercises validateOptions directly, against a bare
+// []Option, without needing a full Command wrapper.
+func TestValidateOptions(t *testing.T) {
+	var s string
+
+	tests := []struct {
+		name    string
+		opts    []Option
+		wantErr bool
+	}{
+		{
+			name: "no options",
+			opts: nil,
+		},
+		{
+			name: "valid, option with Flag only",
+			opts: []Option{{Flag: "f"}},
+		},
+		{
+			name: "valid, option with Long only",
+			opts: []Option{{Long: "foo"}},
+		},
+		{
+			name: "valid, option with Flag and Long",
+			opts: []Option{{Flag: "f", Long: "foo"}},
+		},
+		{
+			name:    "option missing both Flag and Long",
+			opts:    []Option{{}},
+			wantErr: true,
+		},
+		{
+			name:    "option Flag longer than one character",
+			opts:    []Option{{Flag: "-ab"}},
+			wantErr: true,
+		},
+		{
+			name:    "option Flag with only dashes",
+			opts:    []Option{{Flag: "--"}},
+			wantErr: true,
+		},
+		{
+			name: "duplicate option flag, same spelling",
+			opts: []Option{
+				{Flag: "f"},
+				{Flag: "f"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate option flag, different spelling normalizes the same",
+			opts: []Option{
+				{Flag: "f"},
+				{Flag: "-f"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate option long, different spelling normalizes the same",
+			opts: []Option{
+				{Long: "bar"},
+				{Long: "--bar"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Default matches Dest type",
+			opts: []Option{
+				{Flag: "f", Dest: StringVar(&s), Default: "bar"},
+			},
+		},
+		{
+			name: "Default mismatches Dest type",
+			opts: []Option{
+				{Flag: "f", Dest: StringVar(&s), Default: 42},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateOptions(tt.opts)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateOptions() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
