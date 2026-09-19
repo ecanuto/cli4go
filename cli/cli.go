@@ -240,6 +240,30 @@ type Option struct {
 	Env string
 }
 
+// flag returns o.Flag in its normalized short-flag form: a single
+// leading dash followed by the rest of the string with any existing
+// leading dashes stripped. "f", "-f", and "--f" all normalize to "-f".
+// Idempotent on an already-normalized or empty o.Flag.
+func (o Option) flag() string {
+	if o.Flag == "" {
+		return o.Flag
+	}
+	return "-" + strings.TrimLeft(o.Flag, "-")
+}
+
+// long returns o.Long in its normalized long-flag form: two leading
+// dashes followed by the rest of the string with any existing leading
+// dashes stripped. "bar", "-bar", "--bar", and "---bar" all normalize to
+// "--bar" -- a single leading dash is treated the same as no dash at
+// all, so "-bar" (a likely typo) is normalized rather than rejected.
+// Idempotent on an already-normalized or empty o.Long.
+func (o Option) long() string {
+	if o.Long == "" {
+		return o.Long
+	}
+	return "--" + strings.TrimLeft(o.Long, "-")
+}
+
 // Command describes a complete command-line interface: its identity
 // (Name/Version/Description), its positional Arguments, and its Options
 // (flags). A Command is plain data — build it as a struct literal, then
@@ -300,30 +324,6 @@ func (c *Command) stderr() io.Writer {
 		return c.Stderr
 	}
 	return os.Stderr
-}
-
-// --- Flag/Long normalization -------------------------------------------------
-
-// normalizeFlag reshapes s into a canonical short flag form by
-// stripping any leading dashes and prepending exactly one. "f", "-f",
-// and "--f" all normalize to "-f". Idempotent on an already-normalized
-// or empty s.
-func normalizeFlag(s string) string {
-	if s == "" {
-		return s
-	}
-	return "-" + strings.TrimLeft(s, "-")
-}
-
-// normalizeLong reshapes s into a canonical long flag form by
-// stripping any leading dashes and prepending exactly two. "bar",
-// "-bar", "--bar", and "---bar" all normalize to "--bar". Idempotent
-// on an already-normalized or empty s.
-func normalizeLong(s string) string {
-	if s == "" {
-		return s
-	}
-	return "--" + strings.TrimLeft(s, "-")
 }
 
 // --- Validate ----------------------------------------------------------------
@@ -409,8 +409,8 @@ func validateOptions(opts []Option) error {
 		// "--bar"/"bar" on two different Options are correctly treated
 		// as the same form instead of slipping past the uniqueness
 		// checks below as if they were different.
-		flag := normalizeFlag(opt.Flag)
-		long := normalizeLong(opt.Long)
+		flag := opt.flag()
+		long := opt.long()
 
 		// An Option needs at least one of Flag/Long to be reachable from
 		// the command line at all.

@@ -270,6 +270,47 @@ func TestErrVersion_Is(t *testing.T) {
 
 // --- Argument, Option, Command -----------------------------------------------
 
+func TestOptionFlag(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "", want: ""},
+		{input: "f", want: "-f"},
+		{input: "-f", want: "-f"},
+		{input: "--f", want: "-f"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := (Option{Flag: tt.input}).flag(); got != tt.want {
+				t.Errorf("Option{Flag: %q}.flag() = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOptionLong(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{input: "", want: ""},
+		{input: "bar", want: "--bar"},
+		{input: "-bar", want: "--bar"},
+		{input: "--bar", want: "--bar"},
+		{input: "---bar", want: "--bar"}, // documented quirk: kept from the old test
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			if got := (Option{Long: tt.input}).long(); got != tt.want {
+				t.Errorf("Option{Long: %q}.long() = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestStdout(t *testing.T) {
 	tests := []struct {
 		input io.Writer
@@ -303,49 +344,6 @@ func TestStderr(t *testing.T) {
 		if got, want := c.stderr(), tt.want; got != want {
 			t.Errorf("c.stderr() = %v, want %v", got, want)
 		}
-	}
-}
-
-// --- Flag/Long normalization -------------------------------------------------
-
-func TestNormalizeFlag(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{input: "", want: ""},
-		{input: "f", want: "-f"},
-		{input: "-f", want: "-f"},
-		{input: "--f", want: "-f"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := normalizeFlag(tt.input); got != tt.want {
-				t.Errorf("normalizeFlag(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestNormalizeLong(t *testing.T) {
-	tests := []struct {
-		input string
-		want  string
-	}{
-		{input: "", want: ""},
-		{input: "bar", want: "--bar"},
-		{input: "-bar", want: "--bar"},
-		{input: "--bar", want: "--bar"},
-		{input: "---bar", want: "--bar"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			if got := normalizeLong(tt.input); got != tt.want {
-				t.Errorf("normalizeLong(%q) = %q, want %q", tt.input, got, tt.want)
-			}
-		})
 	}
 }
 
