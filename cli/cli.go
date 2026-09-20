@@ -173,7 +173,7 @@ var (
 	ErrVersion = &Error{msg: "cli: version requested", code: 0}
 )
 
-// --- Argument, Option, Command -----------------------------------------------
+// --- Argument, Option, EnvVar, Command, --------------------------------------
 
 // Argument describes a single positional argument. Its position in
 // Command.Arguments determines the order in which it is expected on the
@@ -387,11 +387,18 @@ func (c *Command) allOptions() iter.Seq[Option] {
 // environment variables from Arguments first, then Options, then
 // EnvVars, in that order. The generator stops yielding when yield
 // returns false.
+//
+// Each yielded EnvVar carries its originating Argument/Option's Dest
+// and Default alongside Name/Help -- not just what HelpString needs to
+// render the "Environment Variables:" section, but everything Parse's
+// Default -> Env resolution phase needs too, so Parse can walk this
+// exact same sequence instead of re-deriving it over Arguments/Options
+// on its own.
 func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 	return func(yield func(EnvVar) bool) {
 		for _, arg := range c.Arguments {
 			if arg.Env != "" {
-				if !yield(EnvVar{Name: arg.Env, Help: arg.Help}) {
+				if !yield(EnvVar{Name: arg.Env, Help: arg.Help, Dest: arg.Dest, Default: arg.Default}) {
 					return
 				}
 			}
@@ -399,7 +406,7 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 
 		for opt := range c.allOptions() {
 			if opt.Env != "" {
-				if !yield(EnvVar{Name: opt.Env, Help: opt.Help}) {
+				if !yield(EnvVar{Name: opt.Env, Help: opt.Help, Dest: opt.Dest, Default: opt.Default}) {
 					return
 				}
 			}

@@ -270,7 +270,7 @@ func TestErrVersion_Is(t *testing.T) {
 	}
 }
 
-// --- Argument, Option, Command -----------------------------------------------
+// --- Argument, Option, EnvVar, Command ---------------------------------------
 
 func TestOptionFlag(t *testing.T) {
 	tests := []struct {
@@ -455,6 +455,13 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 }
 
 func TestAllEnvVars(t *testing.T) {
+	// Shared Value instances for the Dest-forwarding case below: the
+	// same *stringValue pointer must appear on both the Argument/Option
+	// side and the "want" side for slices.Equal's interface comparison
+	// to hold.
+	var qux, bar string
+	destQux, destBar := StringVar(&qux), StringVar(&bar)
+
 	tests := []struct {
 		name string
 		cmd  Command
@@ -544,6 +551,26 @@ func TestAllEnvVars(t *testing.T) {
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
+			},
+		},
+		{
+			// Regression guard: allEnvVars must forward Dest and
+			// Default too, not just Name/Help -- Parse's Default ->
+			// Env resolution phase walks this exact same sequence and
+			// needs both to actually apply values.
+			name: "Dest and Default are forwarded from both Argument and Option",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX", Dest: destQux, Default: "fallback-qux"},
+				},
+				Options: []Option{
+					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR", Dest: destBar, Default: "fallback-bar"},
+				},
+			},
+			want: []EnvVar{
+				{Name: "APP_QUX", Help: "The qux to operate on", Dest: destQux, Default: "fallback-qux"},
+				{Name: "APP_BAR", Help: "Set the bar value", Dest: destBar, Default: "fallback-bar"},
 			},
 		},
 	}
@@ -986,7 +1013,7 @@ func TestDefaultParse(t *testing.T) {
 	}
 }
 
-// --- Usage, Help, Version output ---------------------------------------------
+// --- Usage, Help, Version, Error output --------------------------------------
 
 func TestUsageString(t *testing.T) {
 	tests := []struct {
