@@ -370,17 +370,17 @@ func (c *Command) allOptions() iter.Seq[Option] {
 	}
 }
 
-// allEnvVars returns a generator function that yields the environment
-// variable name and its corresponding help text for every Argument and
-// Option in the Command that defines an Env field, followed by every
-// standalone entry in EnvVars. The generator yields environment
-// variables from Arguments first, then Options, then EnvVars, in that
-// order. The generator stops yielding when yield returns false.
-func (c *Command) allEnvVars() iter.Seq2[string, string] {
-	return func(yield func(string, string) bool) {
+// allEnvVars returns a generator function that yields an EnvVar for
+// every Argument and Option in the Command that defines an Env field,
+// followed by every entry in EnvVars itself. The generator yields
+// environment variables from Arguments first, then Options, then
+// EnvVars, in that order. The generator stops yielding when yield
+// returns false.
+func (c *Command) allEnvVars() iter.Seq[EnvVar] {
+	return func(yield func(EnvVar) bool) {
 		for _, arg := range c.Arguments {
 			if arg.Env != "" {
-				if !yield(arg.Env, arg.Help) {
+				if !yield(EnvVar{Name: arg.Env, Help: arg.Help}) {
 					return
 				}
 			}
@@ -388,14 +388,14 @@ func (c *Command) allEnvVars() iter.Seq2[string, string] {
 
 		for opt := range c.allOptions() {
 			if opt.Env != "" {
-				if !yield(opt.Env, opt.Help) {
+				if !yield(EnvVar{Name: opt.Env, Help: opt.Help}) {
 					return
 				}
 			}
 		}
 
-		for _, ev := range c.EnvVars {
-			if !yield(ev.Name, ev.Help) {
+		for _, env := range c.EnvVars {
+			if !yield(env) {
 				return
 			}
 		}
@@ -568,14 +568,14 @@ func (c *Command) validateEnvVars() error {
 		seen[opt.Env] = true
 	}
 
-	for _, ev := range c.EnvVars {
-		if ev.Name == "" {
+	for _, env := range c.EnvVars {
+		if env.Name == "" {
 			return errors.New("cli: EnvVar.Name must not be empty")
 		}
-		if seen[ev.Name] {
-			return fmt.Errorf("cli: duplicate environment variable %q", ev.Name)
+		if seen[env.Name] {
+			return fmt.Errorf("cli: duplicate environment variable %q", env.Name)
 		}
-		seen[ev.Name] = true
+		seen[env.Name] = true
 	}
 
 	return nil
@@ -725,8 +725,8 @@ func (c *Command) HelpString() string {
 		}
 	}
 	widthEnvs := 0
-	for name := range c.allEnvVars() {
-		w := len(name)
+	for env := range c.allEnvVars() {
+		w := len(env.Name)
 		if w > widthEnvs {
 			widthEnvs = w
 		}
@@ -771,8 +771,8 @@ func (c *Command) HelpString() string {
 	// one environment variable
 	if widthEnvs > 0 {
 		fmt.Fprintf(&b, "\nEnvironment Variables:\n")
-		for name, help := range c.allEnvVars() {
-			fmt.Fprintf(&b, "  %-*s   %s\n", width, name, help)
+		for env := range c.allEnvVars() {
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, env.Name, env.Help)
 		}
 	}
 

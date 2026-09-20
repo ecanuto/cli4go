@@ -455,24 +455,10 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 }
 
 func TestAllEnvVars(t *testing.T) {
-	type envVar struct {
-		Name string
-		Help string
-	}
-
-	collect := func(cmd Command) []envVar {
-		var got []envVar
-		cmd.allEnvVars()(func(name, help string) bool {
-			got = append(got, envVar{Name: name, Help: help})
-			return true
-		})
-		return got
-	}
-
 	tests := []struct {
 		name string
 		cmd  Command
-		want []envVar
+		want []EnvVar
 	}{
 		{
 			name: "no Env declared anywhere",
@@ -489,7 +475,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:      "myprogram",
 				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
 			},
-			want: []envVar{
+			want: []EnvVar{
 				{Name: "PROGRAM_QUX", Help: "The qux to operate on"},
 			},
 		},
@@ -499,7 +485,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:    "myprogram",
 				Options: []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
 			},
-			want: []envVar{
+			want: []EnvVar{
 				{Name: "PROGRAM_BAR", Help: "Set the bar value"},
 			},
 		},
@@ -511,7 +497,7 @@ func TestAllEnvVars(t *testing.T) {
 				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
 				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 			},
-			want: []envVar{
+			want: []EnvVar{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 			},
@@ -529,7 +515,7 @@ func TestAllEnvVars(t *testing.T) {
 					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
 				},
 			},
-			want: []envVar{
+			want: []EnvVar{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 			},
@@ -540,7 +526,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:    "myprogram",
 				EnvVars: []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
-			want: []envVar{
+			want: []EnvVar{
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
 			},
 		},
@@ -554,7 +540,7 @@ func TestAllEnvVars(t *testing.T) {
 				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
-			want: []envVar{
+			want: []EnvVar{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
@@ -564,7 +550,7 @@ func TestAllEnvVars(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := collect(tt.cmd)
+			got := slices.Collect(tt.cmd.allEnvVars())
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("allEnvVars() = %+v, want %+v", got, tt.want)
 			}
@@ -610,8 +596,8 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			cmd.allEnvVars()(func(name, _ string) bool {
-				got = append(got, name)
+			cmd.allEnvVars()(func(env EnvVar) bool {
+				got = append(got, env.Name)
 				return len(got) < tt.stopAfter
 			})
 
