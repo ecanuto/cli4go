@@ -5,6 +5,8 @@ import (
 	"errors"
 	"io"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -347,6 +349,111 @@ func TestStderr(t *testing.T) {
 	}
 }
 
+func TestAllOptions(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  Command
+		want []Option
+	}{
+		{
+			name: "no user options, no version",
+			cmd:  Command{Name: "myprogram"},
+			want: []Option{
+				{Flag: "-h", Long: "--help", Help: "Print help"},
+			},
+		},
+		{
+			name: "no user options, with version",
+			cmd:  Command{Name: "myprogram", Version: "0.1.0"},
+			want: []Option{
+				{Flag: "-h", Long: "--help", Help: "Print help"},
+				{Flag: "-v", Long: "--version", Help: "Print version"},
+			},
+		},
+		{
+			name: "user options first, built-ins last",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-f", Help: "Enable foo mode"},
+					{Long: "--bar", Help: "Enable bar mode"},
+				},
+			},
+			want: []Option{
+				{Flag: "-f", Help: "Enable foo mode"},
+				{Long: "--bar", Help: "Enable bar mode"},
+				{Flag: "-h", Long: "--help", Help: "Print help"},
+				{Flag: "-v", Long: "--version", Help: "Print version"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := slices.Collect(tt.cmd.allOptions())
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("allOptions() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAllOptions_StopsEarly(t *testing.T) {
+	cmd := Command{
+		Name:    "myprogram",
+		Version: "0.1.0",
+		Options: []Option{
+			{Flag: "-f", Help: "Enable foo mode"},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		stopAfter int // yield returns false once len(got) reaches this count
+		want      []Option
+	}{
+		{
+			name:      "stops inside the user-declared Options",
+			stopAfter: 1,
+			want: []Option{
+				{Flag: "-f", Help: "Enable foo mode"},
+			},
+		},
+		{
+			name:      "stops right after the synthesized -h/--help",
+			stopAfter: 2,
+			want: []Option{
+				{Flag: "-f", Help: "Enable foo mode"},
+				{Flag: "-h", Long: "--help", Help: "Print help"},
+			},
+		},
+		{
+			name:      "stops right after the synthesized -v/--version",
+			stopAfter: 3,
+			want: []Option{
+				{Flag: "-f", Help: "Enable foo mode"},
+				{Flag: "-h", Long: "--help", Help: "Print help"},
+				{Flag: "-v", Long: "--version", Help: "Print version"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []Option
+			cmd.allOptions()(func(opt Option) bool {
+				got = append(got, opt)
+				return len(got) < tt.stopAfter
+			})
+
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("allOptions() stopped after %d = %+v, want %+v", tt.stopAfter, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- Validate ----------------------------------------------------------------
 
 // TestValidate covers what belongs to Validate itself: the Command.Name
@@ -682,6 +789,192 @@ func TestPrintUsage(t *testing.T) {
 
 	if got, want := buf.String(), "Usage: myprogram [options] [qux]\n"; got != want {
 		t.Errorf("PrintUsage() wrote %q, want %q", got, want)
+	}
+}
+
+func TestHelpString(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  Command
+		want []string
+	}{
+		{
+			name: "minimal usage",
+			cmd:  Command{Name: "myprogram"},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -h, --help   Print help",
+			},
+		},
+		{
+			name: "version, no options",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -h, --help      Print help",
+				"  -v, --version   Print version",
+			},
+		},
+		{
+			name: "description, no options",
+			cmd: Command{
+				Name:        "myprogram",
+				Description: "My foo bar program",
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"My foo bar program",
+				"",
+				"Options:",
+				"  -h, --help   Print help",
+			},
+		},
+		{
+			name: "single option with both Flag and Long",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-f", Long: "--file", Help: "Specify file name"},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -f, --file      Specify file name",
+				"  -h, --help      Print help",
+				"  -v, --version   Print version",
+			},
+		},
+		{
+			name: "flag-only and long-only options mixed with a full one",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-f", Help: "Enable foo mode"},
+					{Flag: "-b", Long: "--bar", Help: "Enable bar mode"},
+					{Long: "--grault", Help: "Enable grault mode"},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -f              Enable foo mode",
+				"  -b, --bar       Enable bar mode",
+				"      --grault    Enable grault mode",
+				"  -h, --help      Print help",
+				"  -v, --version   Print version",
+			},
+		},
+		{
+			name: "single argument, no options",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on"}},
+			},
+			want: []string{
+				"Usage: myprogram [options] [qux]",
+				"",
+				"Arguments:",
+				"  qux          The qux to operate on",
+				"",
+				"Options:",
+				"  -h, --help   Print help",
+			},
+		},
+		{
+			// Regression guard for the width+4/-4 offset: an Argument row has
+			// no "-x, " flag column, so its help text must still land in the
+			// same output column as an Option row's.
+			name: "argument and option aligned to one shared column",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on"}},
+				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value"}},
+			},
+			want: []string{
+				"Usage: myprogram [options] [qux]",
+				"",
+				"Arguments:",
+				"  qux          The qux to operate on",
+				"",
+				"Options:",
+				"  -b, --bar    Set the bar value",
+				"  -h, --help   Print help",
+			},
+		},
+		{
+			name: "multiple arguments, declaration order, uneven widths",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux", Help: "The qux to operate on"},
+					{Name: "quuxlong", Help: "The quuxlong to operate on"},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options] [qux] [quuxlong]",
+				"",
+				"Arguments:",
+				"  qux          The qux to operate on",
+				"  quuxlong     The quuxlong to operate on",
+				"",
+				"Options:",
+				"  -h, --help   Print help",
+			},
+		},
+		{
+			name: "a long argument name widens the shared column past every option",
+			cmd: Command{
+				Name:      "myprogram",
+				Version:   "0.1.0",
+				Arguments: []Argument{{Name: "argumentwithalongname", Help: "Wide one"}},
+				Options:   []Option{{Flag: "-f", Help: "Enable foo mode"}},
+			},
+			want: []string{
+				"Usage: myprogram [options] [argumentwithalongname]",
+				"",
+				"Arguments:",
+				"  argumentwithalongname   Wide one",
+				"",
+				"Options:",
+				"  -f                      Enable foo mode",
+				"  -h, --help              Print help",
+				"  -v, --version           Print version",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := strings.Join(tt.want, "\n") + "\n"
+
+			if got := tt.cmd.HelpString(); got != want {
+				t.Errorf("HelpString() =\n%q\nwant\n%q", got, want)
+			}
+		})
+	}
+}
+
+func TestPrintHelp(t *testing.T) {
+	var buf bytes.Buffer
+	c := &Command{Name: "myprogram", Version: "0.1.0", Stdout: &buf}
+
+	c.PrintHelp()
+
+	if got, want := buf.String(), c.HelpString(); got != want {
+		t.Errorf("PrintHelp() wrote %q, want %q", got, want)
 	}
 }
 

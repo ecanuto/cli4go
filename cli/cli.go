@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"os"
 	"strconv"
 	"strings"
@@ -326,6 +327,30 @@ func (c *Command) stderr() io.Writer {
 	return os.Stderr
 }
 
+// allOptions returns a generator function that yields every Option in
+// the Command, including the built-in -h/--help and -v/--version entries.
+// The generator yields user-declared Options first, then the built-in
+// entries last. The generator stops yielding when yield returns false.
+func (c *Command) allOptions() iter.Seq[Option] {
+	return func(yield func(Option) bool) {
+		for _, opt := range c.Options {
+			if !yield(opt) {
+				return
+			}
+		}
+
+		if !yield(Option{Flag: "-h", Long: "--help", Help: "Print help"}) {
+			return
+		}
+
+		if c.Version != "" {
+			if !yield(Option{Flag: "-v", Long: "--version", Help: "Print version"}) {
+				return
+			}
+		}
+	}
+}
+
 // --- Validate ----------------------------------------------------------------
 
 // Validate checks the Command definition for structural problems (e.g.
@@ -569,7 +594,66 @@ func (c *Command) PrintUsage() {
 // the synthesized -h/--help entry, plus -v/--version when Version is
 // set, both always listed last.
 func (c *Command) HelpString() string {
-	return ""
+	var b strings.Builder
+
+	// Compute the width of the longest option name, so the help text can
+	// align the help text in a column. The width is the length of the
+	// longest normalized long flag (e.g. "--bar") or argument name (e.g.
+	// "qux"), minus 4 characters for the short flag column that always
+	// precedes it in the options row.
+	widthArgs := 0
+	for _, arg := range c.Arguments {
+		w := len(arg.Name)
+		if w > widthArgs {
+			widthArgs = w
+		}
+	}
+	widthOpts := 0
+	for opt := range c.allOptions() {
+		w := len(opt.long()) + 4 // 4 = len("-x, ")
+		if w > widthOpts {
+			widthOpts = w
+		}
+	}
+	width := max(widthArgs, widthOpts)
+
+	// Usage line is always first, so the user sees it immediately.
+	b.WriteString(c.UsageString())
+
+	// Description is optional, so only show it when set.
+	if c.Description != "" {
+		fmt.Fprintf(&b, "\n%s\n", c.Description)
+	}
+
+	// Arguments section (Symmetrically aligned with Options)
+	if len(c.Arguments) > 0 {
+		fmt.Fprintf(&b, "\nArguments:\n")
+		for _, arg := range c.Arguments {
+			// Starts with 2 spaces. We add 4 to the width padding
+			// to compensate for the missing "-x, " flags column
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.Name, arg.Help)
+		}
+	}
+
+	// allOptions() yields the user-declared Options, then the built-in -h/--help
+	// and -v/--version entries (if Version is set). The latter two are always
+	// listed last, so they don't get lost in the middle of a long list of user
+	// flags. Also, the built-in entries are always present, so the Options section
+	// is never empty.
+	fmt.Fprintf(&b, "\nOptions:\n")
+	for opt := range c.allOptions() {
+		flag := opt.flag()
+		long := opt.long()
+		if flag != "" && long != "" {
+			flag += ","
+		}
+		fmt.Fprintf(&b,
+			"  %-3s %-*s   %s\n",
+			flag, width-4, opt.long(), opt.Help, // 4 = len("-x, ")
+		)
+	}
+
+	return b.String()
 }
 
 // PrintHelp writes HelpString (the full help text) to c.Stdout (os.Stdout
