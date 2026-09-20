@@ -266,9 +266,10 @@ func (o Option) long() string {
 }
 
 // EnvVar describes a standalone environment variable: one not bound to
-// any Argument or Option's Env field. It exists purely to be listed in
-// the generated "Environment Variables:" help section (e.g. a variable
-// consulted by application code that has no corresponding flag at all).
+// any Argument or Option's Env field. Unlike Argument/Option, it has no
+// Flag/Long -- it is reachable only via the environment, never via a
+// command-line token -- so its value precedence is just Default -> Env,
+// with no flag position to override it.
 type EnvVar struct {
 	// Name is the environment variable name.
 	Name string
@@ -276,6 +277,16 @@ type EnvVar struct {
 	// Help explains what the environment variable is for. Shown in the
 	// generated "Environment Variables:" help section.
 	Help string
+
+	// Dest binds the resolved value to a variable. See StringVar,
+	// BoolVar, IntVar. Optional -- an EnvVar with no Dest is purely
+	// informational, shown in help but not resolved into anything (the
+	// consuming application reads it itself, e.g. via os.Getenv).
+	Dest Value
+
+	// Default is shown in the help text as "(default: ...)" and is
+	// assigned to Dest before Env is considered.
+	Default any
 }
 
 // Command describes a complete command-line interface: its identity
@@ -422,6 +433,7 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 //  8. Every standalone EnvVar.Name is non-empty.
 //  9. Every environment variable name -- from Arguments' Env, Options'
 //     Env, and EnvVars -- is unique across all three.
+//  10. Same Default/Dest type check as Arguments/Options, for EnvVars.
 //
 // A Validate failure never prints anything -- see the package-level
 // design notes for why (a Validate failure is a bug in the caller's Go
@@ -534,17 +546,19 @@ func validateOptions(opts []Option) error {
 }
 
 // validateEnvVars checks that every standalone EnvVar.Name is non-empty
-// (mirroring the Argument.Name check in validateArguments), and that no
+// (mirroring the Argument.Name check in validateArguments), that no
 // environment variable name is declared more than once across
-// Arguments' Env, Options' Env, and EnvVars. A duplicate would be
-// genuinely ambiguous -- two entries claiming the same environment
-// variable -- and would render as a literal duplicate row in the
-// generated "Environment Variables:" help section.
+// Arguments' Env, Options' Env, and EnvVars, and that each EnvVar's
+// Default (if set) type-matches its Dest -- the same check
+// validateArguments/validateOptions run for Argument/Option. A
+// duplicate name would be genuinely ambiguous -- two entries claiming
+// the same environment variable -- and would render as a literal
+// duplicate row in the generated "Environment Variables:" help section.
 //
 // Unlike validateArguments/validateOptions, this is a *Command method
-// rather than a free function: the check is inherently cross-slice (it
-// has to see Arguments, Options, and EnvVars together), so there's no
-// single []T it could take instead.
+// rather than a free function: the name-uniqueness check is inherently
+// cross-slice (it has to see Arguments, Options, and EnvVars together),
+// so there's no single []T it could take instead.
 func (c *Command) validateEnvVars() error {
 	seen := make(map[string]bool)
 
@@ -576,6 +590,10 @@ func (c *Command) validateEnvVars() error {
 			return fmt.Errorf("cli: duplicate environment variable %q", env.Name)
 		}
 		seen[env.Name] = true
+
+		if err := validateDefaultType(env.Dest, env.Default); err != nil {
+			return err
+		}
 	}
 
 	return nil

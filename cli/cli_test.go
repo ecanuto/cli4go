@@ -817,6 +817,8 @@ func TestValidateOptions(t *testing.T) {
 // cross-slice (Arguments' Env, Options' Env, and EnvVars together), so
 // it takes a full Command rather than a bare slice.
 func TestValidateEnvVars(t *testing.T) {
+	var s string
+
 	tests := []struct {
 		name    string
 		cmd     Command
@@ -883,6 +885,19 @@ func TestValidateEnvVars(t *testing.T) {
 			cmd: Command{
 				Options: []Option{{Flag: "-b", Env: "APP_BAR"}},
 				EnvVars: []EnvVar{{Name: "APP_BAR"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Default matches Dest type",
+			cmd: Command{
+				EnvVars: []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&s), Default: "info"}},
+			},
+		},
+		{
+			name: "Default mismatches Dest type",
+			cmd: Command{
+				EnvVars: []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&s), Default: 42}},
 			},
 			wantErr: true,
 		},
