@@ -54,7 +54,7 @@ func main() {
 		os.Exit(err.ExitCode())
 	}
 
-	fmt.Printf("%s: foo=%v bar=%q qux=%q\n", cmd.Name, cfg.Foo, cfg.Bar, cfg.Qux)
+	fmt.Printf("%s: foo=%v bar=%q qux=%q\n", prg.Name, cfg.Foo, cfg.Bar, cfg.Qux)
 }
 ```
 
