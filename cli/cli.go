@@ -685,38 +685,7 @@ func (c *Command) DefaultParse() *Error {
 	return c.Parse(os.Args[1:])
 }
 
-// --- Usage, Help, Version, Error output --------------------------------------
-
-// UsageString returns the one-line usage summary, e.g.
-// "Usage: myprogram [options] [qux]\n" -- the same line HelpString shows
-// first, and the line Parse prints as part of its error block for a real
-// parsing error (see the Parse doc comment). For the full help text --
-// with the Arguments / Options / Environment Variables sections -- see
-// HelpString.
-func (c *Command) UsageString() string {
-	// Build the "[arg1] [arg2] ..." part of the usage line from the
-	// Command's Arguments. Options are always represented by the
-	// "[options]" placeholder, so they don't need to be listed here.
-	var args strings.Builder
-	for _, arg := range c.Arguments {
-		fmt.Fprintf(&args, " [%s]", arg.Name)
-	}
-
-	// The usage line is always "Usage: <program name> [options] [arg1] [arg2] ..."
-	return fmt.Sprintf("Usage: %s [options]%s\n", c.Name, args.String())
-}
-
-// PrintUsage writes UsageString (the one-line usage summary) to c.Stdout
-// (os.Stdout by default).
-//
-// Parse does not call PrintUsage for its own -h/--help handling (it
-// calls PrintHelp) or for a real parsing error (it assembles its own
-// clap-style block internally -- see the Parse doc comment). PrintUsage
-// remains here as a small standalone convenience, e.g. for a caller's
-// own post-Parse validation that wants to show just the short line.
-func (c *Command) PrintUsage() {
-	fmt.Fprint(c.stdout(), c.UsageString())
-}
+// --- Error output, Usage, Help, Version --------------------------------------
 
 // ErrorString returns the clap-style error block for a real
 // parsing/usage error: the "error: <message>" line, the usage line (see
@@ -750,6 +719,37 @@ func (c *Command) ErrorString(err error) string {
 // clap-style block goes to Stderr independently of Stdout.
 func (c *Command) PrintError(err error) {
 	fmt.Fprint(c.stderr(), c.ErrorString(err))
+}
+
+// UsageString returns the one-line usage summary, e.g.
+// "Usage: myprogram [options] [qux]\n" -- the same line HelpString shows
+// first, and the line Parse prints as part of its error block for a real
+// parsing error (see the Parse doc comment). For the full help text --
+// with the Arguments / Options / Environment Variables sections -- see
+// HelpString.
+func (c *Command) UsageString() string {
+	// Build the "[arg1] [arg2] ..." part of the usage line from the
+	// Command's Arguments. Options are always represented by the
+	// "[options]" placeholder, so they don't need to be listed here.
+	var args strings.Builder
+	for _, arg := range c.Arguments {
+		fmt.Fprintf(&args, " [%s]", arg.Name)
+	}
+
+	// The usage line is always "Usage: <program name> [options] [arg1] [arg2] ..."
+	return fmt.Sprintf("Usage: %s [options]%s\n", c.Name, args.String())
+}
+
+// PrintUsage writes UsageString (the one-line usage summary) to c.Stdout
+// (os.Stdout by default).
+//
+// Parse does not call PrintUsage for its own -h/--help handling (it
+// calls PrintHelp) or for a real parsing error (it assembles its own
+// clap-style block internally -- see the Parse doc comment). PrintUsage
+// remains here as a small standalone convenience, e.g. for a caller's
+// own post-Parse validation that wants to show just the short line.
+func (c *Command) PrintUsage() {
+	fmt.Fprint(c.stdout(), c.UsageString())
 }
 
 // HelpString returns the full formatted help text: the usage line (see
