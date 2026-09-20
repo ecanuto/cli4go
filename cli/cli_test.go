@@ -454,6 +454,141 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 	}
 }
 
+func TestAllEnvVars(t *testing.T) {
+	type envVar struct {
+		Name string
+		Help string
+	}
+
+	collect := func(cmd Command) []envVar {
+		var got []envVar
+		cmd.allEnvVars()(func(name, help string) bool {
+			got = append(got, envVar{Name: name, Help: help})
+			return true
+		})
+		return got
+	}
+
+	tests := []struct {
+		name string
+		cmd  Command
+		want []envVar
+	}{
+		{
+			name: "no Env declared anywhere",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux"}},
+				Options:   []Option{{Flag: "-f"}},
+			},
+			want: nil,
+		},
+		{
+			name: "only an Argument declares Env",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
+			},
+			want: []envVar{
+				{Name: "PROGRAM_QUX", Help: "The qux to operate on"},
+			},
+		},
+		{
+			name: "only an Option declares Env",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
+			},
+			want: []envVar{
+				{Name: "PROGRAM_BAR", Help: "Set the bar value"},
+			},
+		},
+		{
+			// Documented order in allEnvVars: Arguments before Options.
+			name: "env vars from both, Arguments first",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+			},
+			want: []envVar{
+				{Name: "APP_QUX", Help: "The qux to operate on"},
+				{Name: "APP_BAR", Help: "Set the bar value"},
+			},
+		},
+		{
+			name: "only the Arguments/Options that declare Env are yielded",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
+					{Name: "quux", Help: "No env for this one"},
+				},
+				Options: []Option{
+					{Flag: "-f", Help: "No env for this one either"},
+					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
+				},
+			},
+			want: []envVar{
+				{Name: "APP_QUX", Help: "The qux to operate on"},
+				{Name: "APP_BAR", Help: "Set the bar value"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := collect(tt.cmd)
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("allEnvVars() = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAllEnvVars_StopsEarly covers both early-exit points in allEnvVars --
+// the "if !yield(...) { return }" inside the Arguments loop and the one
+// inside the Options loop -- the same reason TestAllOptions_StopsEarly
+// needed more than a single stopping point.
+func TestAllEnvVars_StopsEarly(t *testing.T) {
+	cmd := Command{
+		Name:      "myprogram",
+		Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+		Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+	}
+
+	tests := []struct {
+		name      string
+		stopAfter int
+		wantNames []string
+	}{
+		{
+			name:      "stops inside the Arguments loop",
+			stopAfter: 1,
+			wantNames: []string{"APP_QUX"},
+		},
+		{
+			name:      "stops inside the Options loop",
+			stopAfter: 2,
+			wantNames: []string{"APP_QUX", "APP_BAR"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			cmd.allEnvVars()(func(name, _ string) bool {
+				got = append(got, name)
+				return len(got) < tt.stopAfter
+			})
+
+			if !slices.Equal(got, tt.wantNames) {
+				t.Errorf("allEnvVars() stopped after %d = %+v, want %+v", tt.stopAfter, got, tt.wantNames)
+			}
+		})
+	}
+}
+
 // --- Validate ----------------------------------------------------------------
 
 // TestValidate covers what belongs to Validate itself: the Command.Name
@@ -952,6 +1087,115 @@ func TestHelpString(t *testing.T) {
 				"  -f                      Enable foo mode",
 				"  -h, --help              Print help",
 				"  -v, --version           Print version",
+			},
+		},
+		{
+			name: "env var from an Option",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -b, --bar     Set the bar value",
+				"  -h, --help    Print help",
+				"",
+				"Environment Variables:",
+				"  PROGRAM_BAR   Set the bar value",
+			},
+		},
+		{
+			name: "env var from an Argument",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
+			},
+			want: []string{
+				"Usage: myprogram [options] [qux]",
+				"",
+				"Arguments:",
+				"  qux           The qux to operate on",
+				"",
+				"Options:",
+				"  -h, --help    Print help",
+				"",
+				"Environment Variables:",
+				"  PROGRAM_QUX   The qux to operate on",
+			},
+		},
+		{
+			// allEnvVars documents Arguments before Options; this is the
+			// regression guard for that order.
+			name: "env vars from both an Argument and an Option, Arguments first",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+			},
+			want: []string{
+				"Usage: myprogram [options] [qux]",
+				"",
+				"Arguments:",
+				"  qux          The qux to operate on",
+				"",
+				"Options:",
+				"  -b, --bar    Set the bar value",
+				"  -h, --help   Print help",
+				"",
+				"Environment Variables:",
+				"  APP_QUX      The qux to operate on",
+				"  APP_BAR      Set the bar value",
+			},
+		},
+		{
+			name: "a long env var name widens the shared column past everything else",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_REALLY_LONG_BAR_NAME"},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -b, --bar                      Set the bar value",
+				"  -h, --help                     Print help",
+				"",
+				"Environment Variables:",
+				"  PROGRAM_REALLY_LONG_BAR_NAME   Set the bar value",
+			},
+		},
+		{
+			name: "only the Arguments/Options with Env show up in Environment Variables",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
+					{Name: "quux", Help: "No env for this one"},
+				},
+				Options: []Option{
+					{Flag: "-f", Help: "No env for this one either"},
+					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options] [qux] [quux]",
+				"",
+				"Arguments:",
+				"  qux          The qux to operate on",
+				"  quux         No env for this one",
+				"",
+				"Options:",
+				"  -f           No env for this one either",
+				"  -b, --bar    Set the bar value",
+				"  -h, --help   Print help",
+				"",
+				"Environment Variables:",
+				"  APP_QUX      The qux to operate on",
+				"  APP_BAR      Set the bar value",
 			},
 		},
 	}

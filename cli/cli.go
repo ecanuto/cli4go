@@ -351,6 +351,31 @@ func (c *Command) allOptions() iter.Seq[Option] {
 	}
 }
 
+// allEnvVars returns a generator function that yields the environment
+// variable name and its corresponding help text for every Argument and
+// Option in the Command that defines an Env field. The generator yields
+// environment variables from Arguments first, followed by those from
+// Options. The generator stops yielding when yield returns false.
+func (c *Command) allEnvVars() iter.Seq2[string, string] {
+	return func(yield func(string, string) bool) {
+		for _, arg := range c.Arguments {
+			if arg.Env != "" {
+				if !yield(arg.Env, arg.Help) {
+					return
+				}
+			}
+		}
+
+		for opt := range c.allOptions() {
+			if opt.Env != "" {
+				if !yield(opt.Env, opt.Help) {
+					return
+				}
+			}
+		}
+	}
+}
+
 // --- Validate ----------------------------------------------------------------
 
 // Validate checks the Command definition for structural problems (e.g.
@@ -616,7 +641,14 @@ func (c *Command) HelpString() string {
 			widthOpts = w
 		}
 	}
-	width := max(widthArgs, widthOpts)
+	widthEnvs := 0
+	for name, _ := range c.allEnvVars() {
+		w := len(name)
+		if w > widthEnvs {
+			widthEnvs = w
+		}
+	}
+	width := max(widthArgs, widthOpts, widthEnvs)
 
 	// Usage line is always first, so the user sees it immediately.
 	b.WriteString(c.UsageString())
@@ -650,6 +682,15 @@ func (c *Command) HelpString() string {
 			"  %-3s %-*s   %s\n",
 			flag, width-4, opt.long(), opt.Help, // 4 = len("-x, ")
 		)
+	}
+
+	// Environment Variables section, only render it if we actually found at least
+	// one environment variable
+	if widthEnvs > 0 {
+		fmt.Fprintf(&b, "\nEnvironment Variables:\n")
+		for name, help := range c.allEnvVars() {
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, name, help)
+		}
 	}
 
 	return b.String()
