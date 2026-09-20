@@ -1055,6 +1055,83 @@ func TestPrintUsage(t *testing.T) {
 	}
 }
 
+func TestErrorString(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  Command
+		err  error
+		want []string
+	}{
+		{
+			name: "simple message, no arguments",
+			cmd:  Command{Name: "myprogram"},
+			err:  errors.New("something went wrong"),
+			want: []string{
+				"error: something went wrong",
+				"Usage: myprogram [options]",
+				"",
+				"For more information, try '--help'.",
+			},
+		},
+		{
+			// Regression guard for the "error: " prefix: it must be
+			// display-only, added here, and never baked into the
+			// message the underlying error itself carries.
+			name: "message with a quoted token",
+			cmd:  Command{Name: "myprogram"},
+			err:  errors.New(`unknown option "--nope"`),
+			want: []string{
+				`error: unknown option "--nope"`,
+				"Usage: myprogram [options]",
+				"",
+				"For more information, try '--help'.",
+			},
+		},
+		{
+			// The usage line embedded in the error block must reflect
+			// the Command's own Arguments, exactly like UsageString
+			// does on its own.
+			name: "usage line reflects declared Arguments",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux"}},
+			},
+			err: errors.New(`unexpected argument "extra"`),
+			want: []string{
+				`error: unexpected argument "extra"`,
+				"Usage: myprogram [options] [qux]",
+				"",
+				"For more information, try '--help'.",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			want := strings.Join(tt.want, "\n") + "\n"
+
+			if got := tt.cmd.ErrorString(tt.err); got != want {
+				t.Errorf("ErrorString() =\n%q\nwant\n%q", got, want)
+			}
+		})
+	}
+}
+
+// TestPrintError checks the Stderr routing specifically -- PrintError
+// must write there even though every other Print* method (PrintUsage,
+// PrintHelp, PrintVersion) writes to Stdout instead.
+func TestPrintError(t *testing.T) {
+	var buf bytes.Buffer
+	c := &Command{Name: "myprogram", Stderr: &buf}
+	err := errors.New("something went wrong")
+
+	c.PrintError(err)
+
+	if got, want := buf.String(), c.ErrorString(err); got != want {
+		t.Errorf("PrintError() wrote %q, want %q", got, want)
+	}
+}
+
 func TestHelpString(t *testing.T) {
 	tests := []struct {
 		name string

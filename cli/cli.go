@@ -650,7 +650,8 @@ func validateDefaultType(dest Value, def any) error {
 //     invalid option/argument, including a bad Env value. Parse prints
 //     a clap-style block to c.Stderr before returning (see below).
 //
-// For a real parsing/usage error, Parse prints:
+// For a real parsing/usage error, Parse prints (via PrintError -- see
+// its doc comment):
 //
 //	error: <message>
 //	Usage: myprogram [options] [qux]
@@ -677,7 +678,7 @@ func (c *Command) DefaultParse() *Error {
 	return c.Parse(os.Args[1:])
 }
 
-// --- Usage, Help, Version output ---------------------------------------------
+// --- Usage, Help, Version, Error output --------------------------------------
 
 // UsageString returns the one-line usage summary, e.g.
 // "Usage: myprogram [options] [qux]\n" -- the same line HelpString shows
@@ -708,6 +709,40 @@ func (c *Command) UsageString() string {
 // own post-Parse validation that wants to show just the short line.
 func (c *Command) PrintUsage() {
 	fmt.Fprint(c.stdout(), c.UsageString())
+}
+
+// ErrorString returns the clap-style error block for a real
+// parsing/usage error: the "error: <message>" line, the usage line (see
+// UsageString), and a pointer to '--help'. Parse uses this internally
+// for every real parsing/usage error (ExitCode() == 2) before returning
+// -- see the Parse doc comment for the exact block layout.
+//
+// err is the bare underlying error (e.g. fmt.Errorf("unknown option
+// %q", tok)) -- the "error: " prefix added here is purely for display,
+// mirroring the same rule already documented on Error.Error(): the
+// message stored in the *Error Parse eventually returns is never
+// prefixed with it, so errors.Is/errors.As and any caller-side wrapping
+// keep working against the bare message.
+//
+// Exported for the same reason PrintUsage is: it remains available as a
+// small standalone convenience for a caller's own post-Parse validation
+// (e.g. a future cross-field check) that wants the same clap-style
+// formatting for its own errors.
+func (c *Command) ErrorString(err error) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "error: %v\n", err)
+	b.WriteString(c.UsageString())
+	b.WriteString("\nFor more information, try '--help'.\n")
+	return b.String()
+}
+
+// PrintError writes ErrorString(err) to c.Stderr (os.Stderr by
+// default). Unlike PrintUsage/PrintHelp/PrintVersion -- which always
+// write to Stdout -- PrintError always writes to Stderr, matching the
+// routing rule documented on stderr(): a real parsing/usage error's
+// clap-style block goes to Stderr independently of Stdout.
+func (c *Command) PrintError(err error) {
+	fmt.Fprint(c.stderr(), c.ErrorString(err))
 }
 
 // HelpString returns the full formatted help text: the usage line (see
