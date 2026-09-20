@@ -1077,18 +1077,29 @@ func TestErrorString(t *testing.T) {
 	}
 }
 
-// TestPrintError checks the Stderr routing specifically -- PrintError
-// must write there even though every other Print* method (PrintUsage,
-// PrintHelp, PrintVersion) writes to Stdout instead.
-func TestPrintError(t *testing.T) {
+// TestPrintErrorf checks the Stderr routing -- PrintErrorf must write
+// there even though every other Print* method (PrintUsage, PrintHelp,
+// PrintVersion) writes to Stdout instead -- the %w wrapping through
+// its internal fmt.Errorf, and the returned *Error: always
+// ExitCode() == 2, with a message equal to the formatted error's,
+// unprefixed (the "error: " prefix is display-only, added by
+// ErrorString).
+func TestPrintErrorf(t *testing.T) {
 	var buf bytes.Buffer
 	c := &Command{Name: "myprogram", Stderr: &buf}
-	err := errors.New("something went wrong")
+	cause := errors.New("bad value")
 
-	c.PrintError(err)
+	got := c.PrintErrorf("invalid value %q: %w", "nope", cause)
 
-	if got, want := buf.String(), c.ErrorString(err); got != want {
-		t.Errorf("PrintError() wrote %q, want %q", got, want)
+	wantMsg := `invalid value "nope": bad value`
+	if want := c.ErrorString(errors.New(wantMsg)); buf.String() != want {
+		t.Errorf("PrintErrorf() wrote %q, want %q", buf.String(), want)
+	}
+	if got.ExitCode() != 2 {
+		t.Errorf("PrintErrorf().ExitCode() = %d, want 2", got.ExitCode())
+	}
+	if got.Error() != wantMsg {
+		t.Errorf("PrintErrorf().Error() = %q, want %q", got.Error(), wantMsg)
 	}
 }
 

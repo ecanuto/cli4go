@@ -712,13 +712,33 @@ func (c *Command) ErrorString(err error) string {
 	return b.String()
 }
 
-// PrintError writes ErrorString(err) to c.Stderr (os.Stderr by
-// default). Unlike PrintUsage/PrintHelp/PrintVersion -- which always
-// write to Stdout -- PrintError always writes to Stderr, matching the
-// routing rule documented on stderr(): a real parsing/usage error's
-// clap-style block goes to Stderr independently of Stdout.
-func (c *Command) PrintError(err error) {
+// PrintErrorf formats err per format/args -- exactly like fmt.Errorf,
+// including %w to wrap an underlying error -- writes ErrorString of
+// the result to c.Stderr (os.Stderr by default), and returns the
+// *Error the caller should return in turn. Unlike
+// PrintUsage/PrintHelp/PrintVersion -- which always write to Stdout
+// and return nothing -- PrintErrorf writes to Stderr and returns a
+// value, because formatting the error, printing the block, and
+// building the *Error to return are the same step at every call site:
+// every clap-style error block this package ever prints represents a
+// real parsing/usage error, so the exit code is always 2 (see
+// Error.ExitCode's doc comment) -- there is no code-1 or code-0 case
+// that goes through PrintErrorf.
+//
+// The "f" suffix matters beyond naming convention: it is what lets
+// `go vet`'s printf checker recognize format/args here and catch a
+// mismatched verb -- e.g. %w only wraps inside fmt.Errorf/PrintErrorf;
+// used with a plain fmt.Sprintf-based helper (no "f" suffix) it just
+// prints as an unrecognized verb instead of wrapping the error.
+//
+// A caller that already holds a plain error rather than building one
+// here can still use PrintErrorf -- pass it through with "%s", err,
+// the same way Validate's own failure is wrapped into a *Error via
+// newError(1, "%s", err).
+func (c *Command) PrintErrorf(format string, args ...any) *Error {
+	err := fmt.Errorf(format, args...)
 	fmt.Fprint(c.stderr(), c.ErrorString(err))
+	return newError(2, "%s", err)
 }
 
 // UsageString returns the one-line usage summary, e.g.
