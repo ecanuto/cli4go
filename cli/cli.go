@@ -642,7 +642,7 @@ func (c *Command) HelpString() string {
 		}
 	}
 	widthEnvs := 0
-	for name, _ := range c.allEnvVars() {
+	for name := range c.allEnvVars() {
 		w := len(name)
 		if w > widthEnvs {
 			widthEnvs = w
