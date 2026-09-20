@@ -596,11 +596,12 @@ func (c *Command) PrintUsage() {
 func (c *Command) HelpString() string {
 	var b strings.Builder
 
-	// Compute the width of the longest option name, so the help text can
-	// align the help text in a column. The width is the length of the
-	// longest normalized long flag (e.g. "--bar") or argument name (e.g.
-	// "qux"), minus 4 characters for the short flag column that always
-	// precedes it in the options row.
+	// Compute the shared column width: the longest Argument.Name, and the
+	// longest normalized long flag (e.g. "--bar") plus 4 characters for the
+	// "-x, " short flag column an Option row has but an Argument row doesn't.
+	// The two are computed separately (rather than folded into one loop) so a
+	// future per-section alignment mode only needs to change how they're
+	// combined below, not how each is computed.
 	widthArgs := 0
 	for _, arg := range c.Arguments {
 		w := len(arg.Name)
@@ -629,8 +630,6 @@ func (c *Command) HelpString() string {
 	if len(c.Arguments) > 0 {
 		fmt.Fprintf(&b, "\nArguments:\n")
 		for _, arg := range c.Arguments {
-			// Starts with 2 spaces. We add 4 to the width padding
-			// to compensate for the missing "-x, " flags column
 			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.Name, arg.Help)
 		}
 	}
