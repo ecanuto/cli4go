@@ -265,6 +265,19 @@ func (o Option) long() string {
 	return "--" + strings.TrimLeft(o.Long, "-")
 }
 
+// EnvVar describes a standalone environment variable: one not bound to
+// any Argument or Option's Env field. It exists purely to be listed in
+// the generated "Environment Variables:" help section (e.g. a variable
+// consulted by application code that has no corresponding flag at all).
+type EnvVar struct {
+	// Name is the environment variable name.
+	Name string
+
+	// Help explains what the environment variable is for. Shown in the
+	// generated "Environment Variables:" help section.
+	Help string
+}
+
 // Command describes a complete command-line interface: its identity
 // (Name/Version/Description), its positional Arguments, and its Options
 // (flags). A Command is plain data — build it as a struct literal, then
@@ -293,6 +306,12 @@ type Command struct {
 
 	// Options are the program's flags. Order has no effect on parsing.
 	Options []Option
+
+	// EnvVars are standalone environment variables -- not bound to any
+	// Argument or Option -- shown in the generated "Environment
+	// Variables:" help section. allEnvVars yields Arguments' Env entries
+	// first, then Options', then EnvVars, in that order.
+	EnvVars []EnvVar
 
 	// Stdout is where PrintUsage, PrintHelp, PrintVersion, and standalone
 	// help/version output write to. Defaults to os.Stdout when nil.
@@ -353,9 +372,10 @@ func (c *Command) allOptions() iter.Seq[Option] {
 
 // allEnvVars returns a generator function that yields the environment
 // variable name and its corresponding help text for every Argument and
-// Option in the Command that defines an Env field. The generator yields
-// environment variables from Arguments first, followed by those from
-// Options. The generator stops yielding when yield returns false.
+// Option in the Command that defines an Env field, followed by every
+// standalone entry in EnvVars. The generator yields environment
+// variables from Arguments first, then Options, then EnvVars, in that
+// order. The generator stops yielding when yield returns false.
 func (c *Command) allEnvVars() iter.Seq2[string, string] {
 	return func(yield func(string, string) bool) {
 		for _, arg := range c.Arguments {
@@ -371,6 +391,12 @@ func (c *Command) allEnvVars() iter.Seq2[string, string] {
 				if !yield(opt.Env, opt.Help) {
 					return
 				}
+			}
+		}
+
+		for _, ev := range c.EnvVars {
+			if !yield(ev.Name, ev.Help) {
+				return
 			}
 		}
 	}
@@ -393,6 +419,9 @@ func (c *Command) allEnvVars() iter.Seq2[string, string] {
 //  5. Normalized Flag is exactly 2 characters if set.
 //  6. Normalized Flag and Long are each unique across Options.
 //  7. Same Default/Dest type check as Arguments, for Options.
+//  8. Every standalone EnvVar.Name is non-empty.
+//  9. Every environment variable name -- from Arguments' Env, Options'
+//     Env, and EnvVars -- is unique across all three.
 //
 // A Validate failure never prints anything -- see the package-level
 // design notes for why (a Validate failure is a bug in the caller's Go
@@ -412,6 +441,12 @@ func (c *Command) Validate() error {
 
 	// Options validation
 	if err := validateOptions(c.Options); err != nil {
+		return err
+	}
+
+	// Environment variable validation -- spans Arguments, Options, and
+	// EnvVars together, so it can't live in either helper above.
+	if err := c.validateEnvVars(); err != nil {
 		return err
 	}
 
@@ -495,6 +530,54 @@ func validateOptions(opts []Option) error {
 			return err
 		}
 	}
+	return nil
+}
+
+// validateEnvVars checks that every standalone EnvVar.Name is non-empty
+// (mirroring the Argument.Name check in validateArguments), and that no
+// environment variable name is declared more than once across
+// Arguments' Env, Options' Env, and EnvVars. A duplicate would be
+// genuinely ambiguous -- two entries claiming the same environment
+// variable -- and would render as a literal duplicate row in the
+// generated "Environment Variables:" help section.
+//
+// Unlike validateArguments/validateOptions, this is a *Command method
+// rather than a free function: the check is inherently cross-slice (it
+// has to see Arguments, Options, and EnvVars together), so there's no
+// single []T it could take instead.
+func (c *Command) validateEnvVars() error {
+	seen := make(map[string]bool)
+
+	for _, arg := range c.Arguments {
+		if arg.Env == "" {
+			continue
+		}
+		if seen[arg.Env] {
+			return fmt.Errorf("cli: duplicate environment variable %q", arg.Env)
+		}
+		seen[arg.Env] = true
+	}
+
+	for _, opt := range c.Options {
+		if opt.Env == "" {
+			continue
+		}
+		if seen[opt.Env] {
+			return fmt.Errorf("cli: duplicate environment variable %q", opt.Env)
+		}
+		seen[opt.Env] = true
+	}
+
+	for _, ev := range c.EnvVars {
+		if ev.Name == "" {
+			return errors.New("cli: EnvVar.Name must not be empty")
+		}
+		if seen[ev.Name] {
+			return fmt.Errorf("cli: duplicate environment variable %q", ev.Name)
+		}
+		seen[ev.Name] = true
+	}
+
 	return nil
 }
 

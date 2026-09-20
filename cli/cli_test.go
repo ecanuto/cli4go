@@ -534,6 +534,32 @@ func TestAllEnvVars(t *testing.T) {
 				{Name: "APP_BAR", Help: "Set the bar value"},
 			},
 		},
+		{
+			name: "only a standalone EnvVar",
+			cmd: Command{
+				Name:    "myprogram",
+				EnvVars: []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
+			},
+			want: []envVar{
+				{Name: "APP_DEBUG", Help: "Enable debug logging"},
+			},
+		},
+		{
+			// Documented order in allEnvVars: Arguments, then Options,
+			// then standalone EnvVars last.
+			name: "Arguments, Options, and standalone EnvVars all present, in that order",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
+			},
+			want: []envVar{
+				{Name: "APP_QUX", Help: "The qux to operate on"},
+				{Name: "APP_BAR", Help: "Set the bar value"},
+				{Name: "APP_DEBUG", Help: "Enable debug logging"},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -546,15 +572,17 @@ func TestAllEnvVars(t *testing.T) {
 	}
 }
 
-// TestAllEnvVars_StopsEarly covers both early-exit points in allEnvVars --
-// the "if !yield(...) { return }" inside the Arguments loop and the one
-// inside the Options loop -- the same reason TestAllOptions_StopsEarly
+// TestAllEnvVars_StopsEarly covers all three early-exit points in
+// allEnvVars -- the "if !yield(...) { return }" inside the Arguments
+// loop, the one inside the Options loop, and the one inside the
+// standalone EnvVars loop -- the same reason TestAllOptions_StopsEarly
 // needed more than a single stopping point.
 func TestAllEnvVars_StopsEarly(t *testing.T) {
 	cmd := Command{
 		Name:      "myprogram",
 		Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
 		Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+		EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 	}
 
 	tests := []struct {
@@ -571,6 +599,11 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 			name:      "stops inside the Options loop",
 			stopAfter: 2,
 			wantNames: []string{"APP_QUX", "APP_BAR"},
+		},
+		{
+			name:      "stops inside the EnvVars loop",
+			stopAfter: 3,
+			wantNames: []string{"APP_QUX", "APP_BAR", "APP_DEBUG"},
 		},
 	}
 
@@ -624,6 +657,14 @@ func TestValidate(t *testing.T) {
 			cmd: Command{
 				Name:    "myprogram",
 				Options: []Option{{}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "propagates a validateEnvVars failure",
+			cmd: Command{
+				Name:    "myprogram",
+				EnvVars: []EnvVar{{Name: ""}},
 			},
 			wantErr: true,
 		},
@@ -780,6 +821,92 @@ func TestValidateOptions(t *testing.T) {
 			err := validateOptions(tt.opts)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateOptions() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateEnvVars exercises (*Command).validateEnvVars directly.
+// Unlike validateArguments/validateOptions, this check is inherently
+// cross-slice (Arguments' Env, Options' Env, and EnvVars together), so
+// it takes a full Command rather than a bare slice.
+func TestValidateEnvVars(t *testing.T) {
+	tests := []struct {
+		name    string
+		cmd     Command
+		wantErr bool
+	}{
+		{
+			name: "no env vars anywhere",
+			cmd: Command{
+				Arguments: []Argument{{Name: "qux"}},
+				Options:   []Option{{Flag: "-f"}},
+			},
+		},
+		{
+			name: "valid, one env var per source",
+			cmd: Command{
+				Arguments: []Argument{{Name: "qux", Env: "APP_QUX"}},
+				Options:   []Option{{Flag: "-b", Env: "APP_BAR"}},
+				EnvVars:   []EnvVar{{Name: "APP_DEBUG"}},
+			},
+		},
+		{
+			name:    "empty EnvVar.Name",
+			cmd:     Command{EnvVars: []EnvVar{{Name: ""}}},
+			wantErr: true,
+		},
+		{
+			name: "duplicate name, both from EnvVars",
+			cmd: Command{
+				EnvVars: []EnvVar{{Name: "APP_DEBUG"}, {Name: "APP_DEBUG"}},
+			},
+			wantErr: true,
+		},
+		{
+			// The only scenario that hits the Arguments loop's OWN
+			// duplicate-return line (as opposed to the Options or
+			// EnvVars loop catching a collision seen earlier).
+			name: "duplicate name, both from Arguments",
+			cmd: Command{
+				Arguments: []Argument{
+					{Name: "qux", Env: "APP_QUX"},
+					{Name: "quux", Env: "APP_QUX"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate name, Argument.Env vs Option.Env",
+			cmd: Command{
+				Arguments: []Argument{{Name: "qux", Env: "APP_QUX"}},
+				Options:   []Option{{Flag: "-b", Env: "APP_QUX"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate name, Argument.Env vs EnvVars",
+			cmd: Command{
+				Arguments: []Argument{{Name: "qux", Env: "APP_QUX"}},
+				EnvVars:   []EnvVar{{Name: "APP_QUX"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate name, Option.Env vs EnvVars",
+			cmd: Command{
+				Options: []Option{{Flag: "-b", Env: "APP_BAR"}},
+				EnvVars: []EnvVar{{Name: "APP_BAR"}},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd.validateEnvVars()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateEnvVars() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
@@ -1196,6 +1323,33 @@ func TestHelpString(t *testing.T) {
 				"Environment Variables:",
 				"  APP_QUX      The qux to operate on",
 				"  APP_BAR      Set the bar value",
+			},
+		},
+		{
+			// End-to-end regression guard for allEnvVars' documented
+			// order: Arguments, then Options, then standalone EnvVars
+			// last.
+			name: "standalone EnvVars listed after Argument/Option env vars",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
+			},
+			want: []string{
+				"Usage: myprogram [options] [qux]",
+				"",
+				"Arguments:",
+				"  qux          The qux to operate on",
+				"",
+				"Options:",
+				"  -b, --bar    Set the bar value",
+				"  -h, --help   Print help",
+				"",
+				"Environment Variables:",
+				"  APP_QUX      The qux to operate on",
+				"  APP_BAR      Set the bar value",
+				"  APP_DEBUG    Enable debug logging",
 			},
 		},
 	}
