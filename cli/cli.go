@@ -136,11 +136,12 @@ func (e *Error) Error() string { return e.msg }
 //
 //	0 -- a built-in action fired (-h/--help or -v/--version); the text
 //	     has already been printed to Stdout.
-//	1 -- Command.Validate() failed: the Command itself was declared
-//	     incorrectly (duplicate flag, empty Name, a Default that
-//	     doesn't match its Dest's type, ...) -- a bug in the caller's
-//	     Go code, not something the end user mistyped on the command
-//	     line.
+//	1 -- the Command itself was declared incorrectly (duplicate flag,
+//	     empty Name, a Default that doesn't match its Dest's type or
+//	     can't actually be assigned to it, ...) -- a bug in the
+//	     caller's Go code, not something the end user mistyped on the
+//	     command line. Most often from Validate(), but also from
+//	     Parse's own applyDefaults step (see its doc comment).
 //	2 -- a real parsing/usage error (unknown option, missing value,
 //	     invalid value, unexpected positional argument, a bad Env
 //	     value) -- matches the getopt/argparse convention of using 2
@@ -425,7 +426,7 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 // that order -- unconditionally, unlike allEnvVars() (which only
 // yields entries that declare an Env name): a Default applies whether
 // or not the item also has an Env, so this doesn't filter by Env, or
-// even by whether Dest/Default themselves are set -- applyDefault's
+// even by whether Dest/Default themselves are set -- applyDefaults'
 // own nil checks decide which pairs actually do anything. The
 // generator stops yielding when yield returns false.
 func (c *Command) allDefaults() iter.Seq2[Value, any] {
@@ -683,14 +684,15 @@ func validateDefaultType(dest Value, def any) error {
 //     errors.Is(err, ErrExit) is also true for both; use errors.Is(err,
 //     ErrHelp) / errors.Is(err, ErrVersion) to tell which one fired, if
 //     that matters.
-//   - a Validate failure (ExitCode() == 1): the Command itself was
-//     declared incorrectly -- see the Validate doc comment. Nothing is
+//   - a code-1 failure (ExitCode() == 1): the Command itself was
+//     declared incorrectly -- from Validate() or from Parse's own
+//     applyDefaults step -- see their doc comments. Nothing is
 //     printed.
 //   - a real parsing/usage error (ExitCode() == 2): an unknown or
 //     invalid option/argument, including a bad Env value. Parse prints
 //     a clap-style block to c.Stderr before returning (see below).
 //
-// For a real parsing/usage error, Parse prints (via PrintError -- see
+// For a real parsing/usage error, Parse prints (via PrintErrorf -- see
 // its doc comment):
 //
 //	error: <message>
@@ -703,8 +705,81 @@ func validateDefaultType(dest Value, def any) error {
 // caller-side wrapping keep working against the bare message (e.g.
 // `unknown option "--nope"`).
 func (c *Command) Parse(args []string) *Error {
+	// Reject a Command that was declared incorrectly.
 	if err := c.Validate(); err != nil {
-		return newError(1, "%s", err)
+		return err
+	}
+
+	// Default -> Env resolution, the Default half.
+	if err := c.applyDefaults(); err != nil {
+		return err
+	}
+
+	// Default -> Env resolution, the Env half.
+	if err := c.applyEnvVars(); err != nil {
+		return err
+	}
+
+	// TODO: implement the actual command-line parsing, including handling
+	// the built-in -h/--help and -v/--version flags, and return the appropriate
+	// *Error values as specified in the doc comment above.
+
+	return nil
+}
+
+// applyDefaults assigns each Argument, Option, and standalone EnvVar's
+// Default (if set) to its Dest, via allDefaults() -- the Default half
+// of Default -> Env resolution. Parse always runs applyEnvVars right
+// after (the Env half), so a present environment variable still
+// overrides whatever Default set here.
+//
+// def's type has already been checked against dest's concrete type by
+// validateDefaultType/Validate for the three built-in Value kinds
+// (StringVar/BoolVar/IntVar), so a Set failure here can only happen
+// for a custom Value implementation with an incompatible Default --
+// which validateDefaultType deliberately can't check (see its doc
+// comment). That makes it the same kind of problem Validate() itself
+// reports: the Command was declared incorrectly, not something the
+// end user typed -- so, like Validate(), it reports ExitCode() == 1
+// and prints nothing, unlike a bad command-line or Env value (which
+// goes through PrintErrorf instead).
+func (c *Command) applyDefaults() *Error {
+	for dest, def := range c.allDefaults() {
+		if dest == nil || def == nil {
+			continue
+		}
+		if setErr := dest.Set(fmt.Sprint(def)); setErr != nil {
+			return newError(1, "%s", fmt.Errorf("cli: invalid default value %v: %w", def, setErr))
+		}
+	}
+
+	return nil
+}
+
+// applyEnvVars resolves the Env half of Default -> Env for every
+// Argument, Option, and standalone EnvVar -- in the order allEnvVars()
+// yields them (Arguments, then Options, then EnvVars): when Dest is
+// bound and the named variable is present in the environment, its
+// value overrides whatever Dest already holds (applyDefaults having
+// already run first -- see Parse).
+//
+// A bad value is a real parsing/usage error (ExitCode() == 2),
+// already printed via PrintErrorf by the time this returns it, so
+// Parse can return it as-is.
+func (c *Command) applyEnvVars() *Error {
+	for env := range c.allEnvVars() {
+		if env.Name == "" || env.Dest == nil {
+			continue
+		}
+
+		val, ok := os.LookupEnv(env.Name)
+		if !ok {
+			continue
+		}
+
+		if setErr := env.Dest.Set(val); setErr != nil {
+			return c.PrintErrorf("invalid value %q for environment variable %q: %w", val, env.Name, setErr)
+		}
 	}
 
 	return nil

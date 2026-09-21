@@ -1059,6 +1059,16 @@ type customValue struct{}
 func (customValue) String() string   { return "" }
 func (customValue) Set(string) error { return nil }
 
+// failingValue is a Value whose Set always fails. Used to exercise the
+// applyDefaults Set-failure path (TestParse) -- validateDefaultType
+// can't catch a bad Default for a custom Value ahead of time (see its
+// doc comment), so Validate() lets it through and applyDefaults is the
+// only place left to catch it.
+type failingValue struct{}
+
+func (failingValue) String() string   { return "" }
+func (failingValue) Set(string) error { return errors.New("boom") }
+
 func TestValidateDefaultType(t *testing.T) {
 	var s string
 	var b bool
@@ -1093,6 +1103,317 @@ func TestValidateDefaultType(t *testing.T) {
 }
 
 // --- Parse -------------------------------------------------------------------
+
+// TestParse covers what Parse itself does today: the Validate wiring
+// (already exercised end-to-end via DefaultParse in TestDefaultParse,
+// not repeated here) and step 2 of the algorithm, Default -> Env
+// resolution, across Arguments, Options, and standalone EnvVars. The
+// token loop (steps 3-5) doesn't exist yet, so every case here passes
+// an empty args slice.
+func TestParse(t *testing.T) {
+	t.Run("no default, no env: Dest keeps its zero value", func(t *testing.T) {
+		var s string
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{{Flag: "-b", Dest: StringVar(&s)}},
+		}
+
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "" {
+			t.Errorf("Dest = %q, want zero value", s)
+		}
+	})
+
+	t.Run("default applied when the env var is not set", func(t *testing.T) {
+		var s string
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{{Flag: "-b", Env: "APP_BAR", Dest: StringVar(&s), Default: "fallback"}},
+		}
+
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "fallback" {
+			t.Errorf("Dest = %q, want %q", s, "fallback")
+		}
+	})
+
+	t.Run("env overrides default, for an Argument", func(t *testing.T) {
+		var s string
+		t.Setenv("APP_QUX", "from-env")
+		c := &Command{
+			Name:      "myprogram",
+			Arguments: []Argument{{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s), Default: "fallback"}},
+		}
+
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "from-env" {
+			t.Errorf("Dest = %q, want %q", s, "from-env")
+		}
+	})
+
+	t.Run("env overrides default, for an Option", func(t *testing.T) {
+		var i int
+		t.Setenv("APP_NUM", "42")
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i), Default: 7}},
+		}
+
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if i != 42 {
+			t.Errorf("Dest = %d, want %d", i, 42)
+		}
+	})
+
+	t.Run("a standalone EnvVar's Dest is resolved too", func(t *testing.T) {
+		var s string
+		t.Setenv("APP_DEBUG", "verbose")
+		c := &Command{
+			Name:    "myprogram",
+			EnvVars: []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&s)}},
+		}
+
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "verbose" {
+			t.Errorf("Dest = %q, want %q", s, "verbose")
+		}
+	})
+
+	t.Run("applyDefaults failure propagates: a code-1 *Error, nothing printed", func(t *testing.T) {
+		// validateDefaultType can't check a custom Value's Default (see
+		// its doc comment), so Validate() lets this through and
+		// applyDefaults is the one that has to reject it.
+		var buf bytes.Buffer
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{{Flag: "-x", Dest: failingValue{}, Default: "anything"}},
+			Stderr:  &buf,
+		}
+
+		err := c.Parse(nil)
+		if err == nil {
+			t.Fatal("Parse() = nil, want error")
+		}
+		if err.ExitCode() != 1 {
+			t.Errorf("ExitCode() = %d, want 1", err.ExitCode())
+		}
+		if buf.Len() != 0 {
+			t.Errorf("Parse() wrote %q to Stderr, want nothing", buf.String())
+		}
+	})
+
+	t.Run("invalid env value: ExitCode 2 and a clap-style block on Stderr", func(t *testing.T) {
+		var i int
+		var buf bytes.Buffer
+		t.Setenv("APP_NUM", "not-a-number")
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
+			Stderr:  &buf,
+		}
+
+		err := c.Parse(nil)
+		if err == nil {
+			t.Fatal("Parse() = nil, want error")
+		}
+		if got, want := err.ExitCode(), 2; got != want {
+			t.Errorf("ExitCode() = %d, want %d", got, want)
+		}
+		if got, want := buf.String(), c.ErrorString(err); got != want {
+			t.Errorf("Parse() wrote %q to Stderr, want %q", got, want)
+		}
+	})
+
+	t.Run("a Validate failure short-circuits before any Env resolution", func(t *testing.T) {
+		c := &Command{} // empty Name -> Validate fails
+		err := c.Parse(nil)
+		if err == nil {
+			t.Fatal("Parse() = nil, want error")
+		}
+		if got, want := err.ExitCode(), 1; got != want {
+			t.Errorf("ExitCode() = %d, want %d", got, want)
+		}
+	})
+}
+
+// TestApplyDefaults exercises (*Command).applyDefaults directly.
+// Walking Arguments/Options/EnvVars is allDefaults' own concern (see
+// TestAllDefaults); this covers the wiring, the nil-pair skip, and the
+// Set-failure path.
+func TestApplyDefaults(t *testing.T) {
+	t.Run("wiring: Default assigned to Dest, for an Argument and an Option", func(t *testing.T) {
+		var s string
+		var i int
+		c := &Command{
+			Name:      "myprogram",
+			Arguments: []Argument{{Name: "qux", Dest: StringVar(&s), Default: "fallback"}},
+			Options:   []Option{{Flag: "-n", Dest: IntVar(&i), Default: 7}},
+		}
+
+		if err := c.applyDefaults(); err != nil {
+			t.Fatalf("applyDefaults() = %v, want nil", err)
+		}
+		if s != "fallback" {
+			t.Errorf("Dest = %q, want %q", s, "fallback")
+		}
+		if i != 7 {
+			t.Errorf("Dest = %d, want %d", i, 7)
+		}
+	})
+
+	t.Run("nil Dest/Default pairs are skipped", func(t *testing.T) {
+		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b"}}}
+
+		if err := c.applyDefaults(); err != nil {
+			t.Errorf("applyDefaults() = %v, want nil", err)
+		}
+	})
+
+	t.Run("Set failure: a code-1 *Error, nothing printed", func(t *testing.T) {
+		var buf bytes.Buffer
+		var i int
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{{Flag: "-n", Dest: IntVar(&i), Default: "not-a-number"}},
+			Stderr:  &buf,
+		}
+
+		err := c.applyDefaults()
+		if err == nil {
+			t.Fatal("applyDefaults() = nil, want error")
+		}
+		if err.ExitCode() != 1 {
+			t.Errorf("ExitCode() = %d, want 1", err.ExitCode())
+		}
+		if buf.Len() != 0 {
+			t.Errorf("applyDefaults() wrote %q to Stderr, want nothing", buf.String())
+		}
+	})
+}
+
+// TestApplyEnvVars exercises (*Command).applyEnvVars directly --
+// Arguments, Options, and standalone EnvVars each get their own case,
+// without going through Validate/Parse.
+func TestApplyEnvVars(t *testing.T) {
+	t.Run("no Env declared: Dest untouched", func(t *testing.T) {
+		var s string
+		c := &Command{Options: []Option{{Flag: "-b", Dest: StringVar(&s)}}}
+
+		if err := c.applyEnvVars(); err != nil {
+			t.Errorf("applyEnvVars() = %v, want nil", err)
+		}
+		if s != "" {
+			t.Errorf("Dest = %q, want zero value", s)
+		}
+	})
+
+	t.Run("Env declared but no Dest bound: informational only, no panic even if present", func(t *testing.T) {
+		t.Setenv("APP_BAR", "some-value")
+		c := &Command{Options: []Option{{Flag: "-b", Env: "APP_BAR"}}}
+
+		if err := c.applyEnvVars(); err != nil {
+			t.Errorf("applyEnvVars() = %v, want nil", err)
+		}
+	})
+
+	t.Run("standalone EnvVar with empty Name: skipped defensively, no panic", func(t *testing.T) {
+		// Validate() would normally reject this before Parse ever gets
+		// here; applyEnvVars' own guard is exercised by calling it
+		// directly, bypassing Validate.
+		var s string
+		c := &Command{EnvVars: []EnvVar{{Name: "", Dest: StringVar(&s)}}}
+
+		if err := c.applyEnvVars(); err != nil {
+			t.Errorf("applyEnvVars() = %v, want nil", err)
+		}
+		if s != "" {
+			t.Errorf("Dest = %q, want zero value", s)
+		}
+	})
+
+	t.Run("Env declared but absent from the environment: Dest untouched", func(t *testing.T) {
+		var s string
+		c := &Command{Options: []Option{{Flag: "-b", Env: "APP_DOES_NOT_EXIST", Dest: StringVar(&s)}}}
+
+		if err := c.applyEnvVars(); err != nil {
+			t.Errorf("applyEnvVars() = %v, want nil", err)
+		}
+		if s != "" {
+			t.Errorf("Dest = %q, want zero value", s)
+		}
+	})
+
+	t.Run("env present overrides Dest, for an Argument", func(t *testing.T) {
+		var s string
+		t.Setenv("APP_QUX", "from-env")
+		c := &Command{Arguments: []Argument{{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s)}}}
+
+		if err := c.applyEnvVars(); err != nil {
+			t.Errorf("applyEnvVars() = %v, want nil", err)
+		}
+		if s != "from-env" {
+			t.Errorf("Dest = %q, want %q", s, "from-env")
+		}
+	})
+
+	t.Run("env present overrides Dest, for an Option", func(t *testing.T) {
+		var i int
+		t.Setenv("APP_NUM", "42")
+		c := &Command{Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}}}
+
+		if err := c.applyEnvVars(); err != nil {
+			t.Errorf("applyEnvVars() = %v, want nil", err)
+		}
+		if i != 42 {
+			t.Errorf("Dest = %d, want %d", i, 42)
+		}
+	})
+
+	t.Run("env present overrides Dest, for a standalone EnvVar", func(t *testing.T) {
+		var s string
+		t.Setenv("APP_DEBUG", "verbose")
+		c := &Command{EnvVars: []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&s)}}}
+
+		if err := c.applyEnvVars(); err != nil {
+			t.Errorf("applyEnvVars() = %v, want nil", err)
+		}
+		if s != "verbose" {
+			t.Errorf("Dest = %q, want %q", s, "verbose")
+		}
+	})
+
+	t.Run("invalid env value: a code-2 *Error, already printed to Stderr", func(t *testing.T) {
+		var i int
+		var buf bytes.Buffer
+		t.Setenv("APP_NUM", "not-a-number")
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
+			Stderr:  &buf,
+		}
+
+		err := c.applyEnvVars()
+		if err == nil {
+			t.Fatal("applyEnvVars() = nil, want error")
+		}
+		if err.ExitCode() != 2 {
+			t.Errorf("ExitCode() = %d, want 2", err.ExitCode())
+		}
+		if got, want := buf.String(), c.ErrorString(err); got != want {
+			t.Errorf("applyEnvVars() wrote %q to Stderr, want %q", got, want)
+		}
+	})
+}
 
 // TestDefaultParse only exercises the DefaultParse -> Parse -> Validate
 // wiring (one success, one Validate failure) using os.Args directly.
