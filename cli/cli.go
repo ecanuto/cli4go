@@ -350,9 +350,9 @@ type EnvVar struct {
 //
 // Program is an alias for Command, kept as the conventional name for the
 // common single-command case (a CLI with no subcommands). The two are
-// identical to the compiler; there is currently no separate mechanism
-// for declaring subcommands (see project-context.md for the planned
-// Commands field and routing design).
+// identical to the compiler. There is currently no mechanism for
+// declaring subcommands; a future Commands field and its routing design
+// are still being worked out.
 type Command struct {
 	// Name is the program's name, shown in usage and version output.
 	Name string
