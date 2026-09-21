@@ -114,11 +114,11 @@ func isBoolFlag(v Value) bool {
 //	    os.Exit(err.ExitCode())
 //	}
 //
-// Error is a concrete type, not an interface: Parse only ever builds one
-// kind of failure value, so there is no abstraction to gain from a
-// separate interface, and returning *Error directly (instead of the
-// built-in error) means a nil check is a plain pointer comparison, with
-// no typed-nil-in-interface pitfall to worry about.
+// Error is a concrete type, not an interface: this package only ever
+// builds one kind of failure value, so there is no abstraction to gain
+// from a separate interface, and returning *Error directly (instead of
+// the built-in error) means a nil check is a plain pointer comparison,
+// with no typed-nil-in-interface pitfall to worry about.
 type Error struct {
 	msg  string
 	code int
@@ -444,29 +444,32 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 //
 // A Validate failure never prints anything -- see the package-level
 // design notes for why (a Validate failure is a bug in the caller's Go
-// code, not something an end user mistyped).
-func (c *Command) Validate() error {
+// code, not something an end user mistyped). It always reports
+// ExitCode() == 1 -- see Error.ExitCode's doc comment -- so a caller
+// using Validate on its own (outside Parse) gets the same
+// os.Exit(err.ExitCode()) idiom Parse/DefaultParse already document.
+func (c *Command) Validate() *Error {
 	// Command.Name is required -- it's used in usage/help/version output.
 	// This check has nowhere else to live: it isn't part of either loop
 	// below, so it stays here rather than in a helper.
 	if c.Name == "" {
-		return errors.New("cli: Command.Name must not be empty")
+		return newError(1, "cli: Command.Name must not be empty")
 	}
 
 	// Arguments validation
 	if err := validateArguments(c.Arguments); err != nil {
-		return err
+		return newError(1, "%s", err)
 	}
 
 	// Options validation
 	if err := validateOptions(c.Options); err != nil {
-		return err
+		return newError(1, "%s", err)
 	}
 
 	// Environment variable validation -- spans Arguments, Options, and
 	// EnvVars together, so it can't live in either helper above.
 	if err := c.validateEnvVars(); err != nil {
-		return err
+		return newError(1, "%s", err)
 	}
 
 	return nil

@@ -689,6 +689,11 @@ func TestValidate(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
+			// Every Validate failure reports ExitCode() == 1 -- see its
+			// doc comment.
+			if err != nil && err.ExitCode() != 1 {
+				t.Errorf("Validate().ExitCode() = %d, want 1", err.ExitCode())
+			}
 		})
 	}
 }
