@@ -635,6 +635,112 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 	}
 }
 
+// TestAllDefaults exercises allDefaults directly. Unlike
+// allOptions/allEnvVars, it yields unconditionally -- every
+// Argument/Option/EnvVar produces a (Dest, Default) pair even when
+// both are nil -- so the cases here cover that alongside the
+// Arguments-then-Options-then-EnvVars order.
+func TestAllDefaults(t *testing.T) {
+	type pair struct {
+		Dest    Value
+		Default any
+	}
+	collect := func(c Command) []pair {
+		var got []pair
+		c.allDefaults()(func(dest Value, def any) bool {
+			got = append(got, pair{dest, def})
+			return true
+		})
+		return got
+	}
+
+	t.Run("no Arguments/Options/EnvVars: yields nothing", func(t *testing.T) {
+		if got := collect(Command{Name: "myprogram"}); got != nil {
+			t.Errorf("allDefaults() = %+v, want nil", got)
+		}
+	})
+
+	t.Run("items with no Default are still yielded, as a nil pair", func(t *testing.T) {
+		c := Command{
+			Name:      "myprogram",
+			Arguments: []Argument{{Name: "qux"}},
+			Options:   []Option{{Flag: "-f"}},
+		}
+		want := []pair{{nil, nil}, {nil, nil}}
+		if got := collect(c); !slices.Equal(got, want) {
+			t.Errorf("allDefaults() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("Default set on an Option with no Env at all -- regression guard", func(t *testing.T) {
+		// A Default applies regardless of Env; unlike allEnvVars(),
+		// allDefaults() must not filter on it.
+		var i int
+		dest := IntVar(&i)
+		c := Command{Name: "myprogram", Options: []Option{{Flag: "-n", Dest: dest, Default: 7}}}
+		want := []pair{{dest, 7}}
+		if got := collect(c); !slices.Equal(got, want) {
+			t.Errorf("allDefaults() = %+v, want %+v", got, want)
+		}
+	})
+
+	t.Run("Arguments, then Options, then EnvVars, in that order", func(t *testing.T) {
+		var qux, bar, debug string
+		destQux, destBar, destDebug := StringVar(&qux), StringVar(&bar), StringVar(&debug)
+		c := Command{
+			Name:      "myprogram",
+			Arguments: []Argument{{Name: "qux", Dest: destQux, Default: "fallback-qux"}},
+			Options:   []Option{{Flag: "-b", Dest: destBar, Default: "fallback-bar"}},
+			EnvVars:   []EnvVar{{Name: "APP_DEBUG", Dest: destDebug, Default: "fallback-debug"}},
+		}
+		want := []pair{
+			{destQux, "fallback-qux"},
+			{destBar, "fallback-bar"},
+			{destDebug, "fallback-debug"},
+		}
+		if got := collect(c); !slices.Equal(got, want) {
+			t.Errorf("allDefaults() = %+v, want %+v", got, want)
+		}
+	})
+}
+
+// TestAllDefaults_StopsEarly covers all three early-exit points in
+// allDefaults, the same reason TestAllEnvVars_StopsEarly needed more
+// than a single stopping point.
+func TestAllDefaults_StopsEarly(t *testing.T) {
+	var a, b, e string
+	cmd := Command{
+		Name:      "myprogram",
+		Arguments: []Argument{{Name: "qux", Dest: StringVar(&a), Default: "a"}},
+		Options:   []Option{{Flag: "-b", Dest: StringVar(&b), Default: "b"}},
+		EnvVars:   []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&e), Default: "e"}},
+	}
+
+	tests := []struct {
+		name      string
+		stopAfter int
+		wantDefs  []any
+	}{
+		{name: "stops inside the Arguments loop", stopAfter: 1, wantDefs: []any{"a"}},
+		{name: "stops inside the Options loop", stopAfter: 2, wantDefs: []any{"a", "b"}},
+		{name: "stops inside the EnvVars loop", stopAfter: 3, wantDefs: []any{"a", "b", "e"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []any
+			cmd.allDefaults()(func(_ Value, def any) bool {
+				got = append(got, def)
+				return len(got) < tt.stopAfter
+			})
+
+			if !slices.Equal(got, tt.wantDefs) {
+				t.Errorf("allDefaults() stopped after %d = %+v, want %+v", tt.stopAfter, got, tt.wantDefs)
+			}
+		})
+	}
+}
+
 // --- Validate ----------------------------------------------------------------
 
 // TestValidate covers what belongs to Validate itself: the Command.Name

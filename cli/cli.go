@@ -420,6 +420,36 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 	}
 }
 
+// allDefaults returns a generator function that yields the (Dest,
+// Default) pair for every Argument, Option, and standalone EnvVar, in
+// that order -- unconditionally, unlike allEnvVars() (which only
+// yields entries that declare an Env name): a Default applies whether
+// or not the item also has an Env, so this doesn't filter by Env, or
+// even by whether Dest/Default themselves are set -- applyDefault's
+// own nil checks decide which pairs actually do anything. The
+// generator stops yielding when yield returns false.
+func (c *Command) allDefaults() iter.Seq2[Value, any] {
+	return func(yield func(Value, any) bool) {
+		for _, arg := range c.Arguments {
+			if !yield(arg.Dest, arg.Default) {
+				return
+			}
+		}
+
+		for _, opt := range c.Options {
+			if !yield(opt.Dest, opt.Default) {
+				return
+			}
+		}
+
+		for _, env := range c.EnvVars {
+			if !yield(env.Dest, env.Default) {
+				return
+			}
+		}
+	}
+}
+
 // --- Validate ----------------------------------------------------------------
 
 // Validate checks the Command definition for structural problems (e.g.
