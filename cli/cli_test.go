@@ -413,6 +413,159 @@ func TestAllOptions(t *testing.T) {
 				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
+		{
+			name: "user claims both help forms: help built-in suppressed",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "-h", Long: "--help", Help: "Custom help"},
+				},
+			},
+			want: []Option{
+				{Flag: "-h", Long: "--help", Help: "Custom help"},
+			},
+		},
+		{
+			name: "user claims both version forms: version built-in suppressed",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-v", Long: "--version", Help: "Custom version"},
+				},
+			},
+			want: []Option{
+				{Flag: "-v", Long: "--version", Help: "Custom version"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			name: "user claims both built-ins: only user Options yielded",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-h", Long: "--help", Help: "Custom help"},
+					{Flag: "-v", Long: "--version", Help: "Custom version"},
+				},
+			},
+			want: []Option{
+				{Flag: "-h", Long: "--help", Help: "Custom help"},
+				{Flag: "-v", Long: "--version", Help: "Custom version"},
+			},
+		},
+		{
+			name: "user claims both version forms but Version is empty: nothing suppressed",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "-v", Long: "--version", Help: "Custom version"},
+				},
+			},
+			want: []Option{
+				{Flag: "-v", Long: "--version", Help: "Custom version"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			name: "user claims -v only: version built-in falls back to -V",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+				},
+			},
+			want: []Option{
+				{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				{Flag: "-V", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			name: "user claims -v and -V: version built-in keeps only --version",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+					{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+				},
+			},
+			want: []Option{
+				{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+				{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				{Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			name: "user claims -V only: version built-in keeps -v",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+				},
+			},
+			want: []Option{
+				{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			name: "user claims -h only: help built-in NOT suppressed (collision)",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "-h"}},
+			},
+			want: []Option{
+				{Flag: "-h"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			name: "user claims --help only: help built-in NOT suppressed (collision)",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Long: "--help"}},
+			},
+			want: []Option{
+				{Long: "--help"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			// Suppression is per-token, not per-Option: two Options that
+			// between them claim both forms leave nothing for the
+			// built-in to collide with, so it is suppressed.
+			name: "both help forms claimed across two Options: help built-in suppressed",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-h"},
+					{Long: "--help"},
+				},
+			},
+			want: []Option{
+				{Flag: "-h"},
+				{Long: "--help"},
+				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+			},
+		},
+		{
+			name: "user claims -h only: no -H fallback for help",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "-h", Long: "--host", Help: "Host"}},
+			},
+			want: []Option{
+				{Flag: "-h", Long: "--host", Help: "Host"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -482,6 +635,29 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("suppression shortens the sequence", func(t *testing.T) {
+		cmd := Command{
+			Name:    "myprogram",
+			Version: "0.1.0",
+			Options: []Option{
+				{Flag: "-h", Long: "--help", Help: "Custom help"},
+			},
+		}
+
+		var got []Option
+		cmd.allOptions()(func(opt Option) bool {
+			got = append(got, opt)
+			return true
+		})
+
+		if len(got) != 2 {
+			t.Fatalf("allOptions() = %d options, want 2 (user -h/--help + version built-in)", len(got))
+		}
+		if got[1].Flag != "-v" || got[1].Long != "--version" {
+			t.Errorf("second yielded Option = %+v, want the version built-in", got[1])
+		}
+	})
 }
 
 func TestAllEnvVars(t *testing.T) {
@@ -816,6 +992,57 @@ func TestValidate(t *testing.T) {
 				EnvVars: []EnvVar{{Name: ""}},
 			},
 			wantErr: true,
+		},
+		{
+			name: "partial claim on the help built-in's forms: collision rejected",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "-h", Help: "Custom help"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "partial claim on the version built-in's forms: collision rejected",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{{Long: "--version", Help: "Custom version"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "-v claimed without --version: version built-in falls back to -V, no conflict",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{{Flag: "-v", Long: "--verbose", Help: "Verbose"}},
+			},
+		},
+		{
+			name: "-v and -V claimed without --version: version built-in keeps --version only, no conflict",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+					{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+				},
+			},
+		},
+		{
+			name: "full claim on the help built-in's forms: built-in suppressed, no conflict",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{{Flag: "-h", Long: "--help", Help: "Custom help"}},
+			},
+		},
+		{
+			name: "full claim on the version built-in's forms: built-in suppressed, no conflict",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{{Flag: "-v", Long: "--version", Help: "Custom version"}},
+			},
 		},
 	}
 
@@ -1310,6 +1537,34 @@ func TestParse_TokenLoop(t *testing.T) {
 		}
 	})
 
+	t.Run("user claims both help forms: -h dispatches to the user's Option, not the built-in", func(t *testing.T) {
+		var ran, custom bool
+		var buf bytes.Buffer
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{{
+				Flag: "-h", Long: "--help", Help: "Custom help",
+				// A boolean Dest keeps the Option from consuming a value.
+				Dest: BoolVar(&custom),
+				Action: func(c *Command, opt Option, value string) *Error {
+					ran = true
+					return nil
+				},
+			}},
+			Stdout: &buf,
+		}
+
+		if err := c.Parse([]string{"-h"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !ran {
+			t.Error("user-declared -h Action did not run; the built-in help fired instead")
+		}
+		if buf.Len() != 0 {
+			t.Errorf("Parse() wrote %q to Stdout, want nothing (no built-in help)", buf.String())
+		}
+	})
+
 	t.Run("-v prints version and returns ErrVersion, when Version is set", func(t *testing.T) {
 		var buf bytes.Buffer
 		c := &Command{Name: "myprogram", Version: "0.1.0", Stdout: &buf}
@@ -1320,6 +1575,56 @@ func TestParse_TokenLoop(t *testing.T) {
 		}
 		if got, want := buf.String(), c.VersionString()+"\n"; got != want {
 			t.Errorf("Parse() wrote %q to Stdout, want %q", got, want)
+		}
+	})
+
+	t.Run("-v claimed by the user: -v runs the user's Option, -V prints version", func(t *testing.T) {
+		var verbose bool
+		var buf bytes.Buffer
+		c := &Command{
+			Name:    "myprogram",
+			Version: "0.1.0",
+			Stdout:  &buf,
+			Options: []Option{{Flag: "-v", Long: "--verbose", Help: "Verbose", Dest: BoolVar(&verbose)}},
+		}
+
+		if err := c.Parse([]string{"-v"}); err != nil {
+			t.Fatalf("Parse(-v) = %v, want nil", err)
+		}
+		if !verbose {
+			t.Error("Parse(-v) did not set the user's Option")
+		}
+		if buf.Len() != 0 {
+			t.Errorf("Parse(-v) wrote %q to Stdout, want nothing", buf.String())
+		}
+
+		err := c.Parse([]string{"-V"})
+		if !errors.Is(err, ErrVersion) {
+			t.Fatalf("Parse(-V) = %v, want ErrVersion", err)
+		}
+		if got, want := buf.String(), c.VersionString()+"\n"; got != want {
+			t.Errorf("Parse(-V) wrote %q to Stdout, want %q", got, want)
+		}
+	})
+
+	t.Run("-v and -V both claimed: --version still prints version", func(t *testing.T) {
+		var v1, v2 bool
+		var buf bytes.Buffer
+		c := &Command{
+			Name:    "myprogram",
+			Version: "0.1.0",
+			Stdout:  &buf,
+			Options: []Option{
+				{Flag: "-v", Long: "--verbose", Dest: BoolVar(&v1)},
+				{Flag: "-V", Long: "--vv", Dest: BoolVar(&v2)},
+			},
+		}
+
+		if err := c.Parse([]string{"--version"}); !errors.Is(err, ErrVersion) {
+			t.Fatalf("Parse(--version) = %v, want ErrVersion", err)
+		}
+		if got, want := buf.String(), c.VersionString()+"\n"; got != want {
+			t.Errorf("Parse(--version) wrote %q to Stdout, want %q", got, want)
 		}
 	})
 
@@ -2337,6 +2642,46 @@ func TestHelpString(t *testing.T) {
 				"  APP_QUX      The qux to operate on",
 				"  APP_BAR      Set the bar value",
 				"  APP_DEBUG    Enable debug logging",
+			},
+		},
+		{
+			// -v is taken, so the version built-in is listed as -V.
+			name: "user claims -v: version built-in listed as -V",
+			cmd: Command{
+				Name:    "myprogram",
+				Version: "0.1.0",
+				Options: []Option{
+					{Flag: "-v", Long: "--verbose", Help: "Verbose output"},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -v, --verbose   Verbose output",
+				"  -h, --help      Print help",
+				"  -V, --version   Print version",
+			},
+		},
+		{
+			// Suppression case: the user claims both of the help
+			// built-in's forms, so the built-in is not yielded and
+			// there is no duplicate -h row. The Options column width
+			// is still driven by "--help" (the user's own Long), so
+			// the alignment is unchanged from the usual three-column
+			// case.
+			name: "user claims both help forms: no built-in help row, no duplicate",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					{Flag: "-h", Long: "--help", Help: "Show this message"},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -h, --help   Show this message",
 			},
 		},
 	}

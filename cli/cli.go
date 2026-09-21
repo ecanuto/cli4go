@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -259,11 +260,24 @@ type Option struct {
 
 	// Flag is the short flag form, e.g. "f" or "-f" -- the leading dash
 	// is optional and added automatically if omitted. Optional field.
+	//
+	// Declaring both this and the matching Long form of a built-in
+	// (-h and --help, or -v and --version), whether on one Option or
+	// split across several, suppresses that built-in entry from the
+	// generated help and from Parse's dispatch; declaring only one of
+	// the two forms is a conflict, rejected by Validate. The one
+	// exception is -v: declaring it without --version makes the
+	// version built-in use -V instead. See allOptions' doc comment.
 	Flag string
 
 	// Long is the long flag form, e.g. "bar" or "--bar" -- the leading "--"
 	// is optional and added automatically if omitted. Optional, though at
 	// least one of Flag/Long should be set.
+	//
+	// See Flag's doc comment for how declaring a built-in's forms
+	// affects that built-in. In particular, declaring "--version"
+	// while leaving "-v" free is a conflict, not a fallback: only a
+	// claimed "-v" makes the version built-in switch to "-V".
 	Long string
 
 	// Help explains what the option does. Shown in the generated
@@ -415,6 +429,26 @@ func (c *Command) stderr() io.Writer {
 // the Command, including the built-in -h/--help and -v/--version entries.
 // The generator yields user-declared Options first, then the built-in
 // entries last. The generator stops yielding when yield returns false.
+//
+// A built-in entry is suppressed entirely -- not yielded at all --
+// when the user-declared Options already claim both of its normalized
+// forms. The two forms may be claimed by a single Option or by two
+// different ones; only the set of claimed forms matters. Suppression
+// is per built-in, not per form: claiming only
+// -h (and not --help) does NOT suppress the help built-in, it
+// collides with it, and validateOptions rejects that collision as a
+// duplicate flag. Claiming both -h and --help, on the other hand,
+// suppresses the help built-in cleanly -- the user's declaration
+// wins, and there is no duplicate to reject. The same rule applies
+// to -v/--version, and only when Version is set.
+//
+// The version built-in has one extra rule: when the user-declared Options
+// claim -v but not --version, the built-in is not a collision. It is
+// yielded with -V as its short form instead, since -v is commonly taken
+// by "verbose" and -v/-V is an established convention. If -V is claimed
+// too, the short form is dropped and only --version is yielded. Help has
+// no such fallback: -H conventionally means "host", so the help built-in
+// is either -h/--help or suppressed.
 func (c *Command) allOptions() iter.Seq[Option] {
 	return func(yield func(Option) bool) {
 		for _, opt := range c.Options {
@@ -433,28 +467,67 @@ func (c *Command) allOptions() iter.Seq[Option] {
 		// its own to store.
 		var discard bool
 
-		if !yield(Option{
-			Flag: "-h", Long: "--help", Help: "Print help",
-			Dest: BoolVar(&discard),
-			Action: func(c *Command, opt Option, value string) *Error {
-				c.PrintHelp()
-				return ErrHelp
-			},
-		}) {
-			return
+		// Which normalized Flag/Long forms the user-declared Options
+		// claim, so the suppression/fallback rules below can be
+		// decided per built-in. "Taken" is per-token: a form counts
+		// whether or not the Option claiming it also declares the
+		// other form, and whether or not both of a built-in's forms
+		// come from the same Option -- see the doc comment above.
+		takenFlags := make(map[string]bool, len(c.Options))
+		takenLongs := make(map[string]bool, len(c.Options))
+		for _, opt := range c.Options {
+			if f := opt.flag(); f != "" {
+				takenFlags[f] = true
+			}
+			if l := opt.long(); l != "" {
+				takenLongs[l] = true
+			}
+		}
+
+		// Suppress the help built-in only when the user has claimed
+		// BOTH of its forms. A partial claim (only -h, or only
+		// --help) leaves the built-in intact, and validateOptions
+		// then reports the resulting duplicate.
+		if !(takenFlags["-h"] && takenLongs["--help"]) {
+			if !yield(Option{
+				Flag: "-h", Long: "--help", Help: "Print help",
+				Dest: BoolVar(&discard),
+				Action: func(c *Command, opt Option, value string) *Error {
+					c.PrintHelp()
+					return ErrHelp
+				},
+			}) {
+				return
+			}
 		}
 
 		if c.Version != "" {
-			if !yield(Option{
-				Flag: "-v", Long: "--version", Help: "Print version",
+			// -v is overloaded in the wild (verbose vs. version), so when
+			// a user-declared Option already claims it, fall back to -V,
+			// the conventional capital-letter alternative. If -V is taken
+			// too, the short form is dropped and only --version remains.
+			// When --version is claimed as well, both forms are taken and
+			// the built-in is suppressed, exactly as for help.
+			short := "-v"
+			if takenFlags["-v"] {
+				switch {
+				case takenLongs["--version"]:
+					return
+				case takenFlags["-V"]:
+					short = ""
+				default:
+					short = "-V"
+				}
+			}
+
+			yield(Option{
+				Flag: short, Long: "--version", Help: "Print version",
 				Dest: BoolVar(&discard),
 				Action: func(c *Command, opt Option, value string) *Error {
 					c.PrintVersion()
 					return ErrVersion
 				},
-			}) {
-				return
-			}
+			})
 		}
 	}
 }
@@ -543,12 +616,20 @@ func (c *Command) allDefaults() iter.Seq2[Value, any] {
 //     type.
 //  4. Every Option has Flag and/or Long set.
 //  5. Normalized Flag is exactly 2 characters if set.
-//  6. Normalized Flag and Long are each unique across Options.
-//  7. Same Default/Dest type check as Arguments, for Options.
-//  8. Every standalone EnvVar.Name is non-empty.
-//  9. Every environment variable name -- from Arguments' Env, Options'
+//  6. A built-in (-h/--help, -v/--version) whose both normalized forms
+//     are claimed by the user-declared Options is suppressed, not
+//     yielded by allOptions(). The version built-in also falls back to
+//     -V (or to --version alone) when -v is claimed without
+//     --version; see allOptions' doc comment.
+//  7. Normalized Flag and Long are each unique across the effective
+//     Option set (allOptions() -- user-declared Options plus whichever
+//     built-ins survived suppression), so a partial claim on a
+//     built-in's forms is rejected as a real conflict.
+//  8. Same Default/Dest type check as Arguments, for Options.
+//  9. Every standalone EnvVar.Name is non-empty.
+//  10. Every environment variable name -- from Arguments' Env, Options'
 //     Env, and EnvVars -- is unique across all three.
-//  10. Same Default/Dest type check as Arguments/Options, for EnvVars.
+//  11. Same Default/Dest type check as Arguments/Options, for EnvVars.
 //
 // Dest and Action are not checked against each other -- an Option may
 // set neither, either, or both (see Option.Action's doc comment for
@@ -573,8 +654,12 @@ func (c *Command) Validate() *Error {
 		return newError(1, "%s", err)
 	}
 
-	// Options validation
-	if err := validateOptions(c.Options); err != nil {
+	// Options validation. Runs against the effective Option set --
+	// c.allOptions(), not c.Options -- so a user-declared Option that
+	// collides with a synthesized built-in (a partial claim on -h or
+	// --help, say) is caught here exactly like any other duplicate
+	// flag. See allOptions' doc comment for the suppression rule.
+	if err := validateOptions(slices.Collect(c.allOptions())); err != nil {
 		return newError(1, "%s", err)
 	}
 
@@ -617,9 +702,16 @@ func validateArguments(args []Argument) error {
 }
 
 // validateOptions checks opts for structural problems: a missing
-// Flag/Long, a malformed Flag, a duplicate Flag/Long across Options, or
-// a Default whose type doesn't match Dest. Same free-function shape as
+// Flag/Long, a malformed Flag, a duplicate Flag/Long, or a Default
+// whose type doesn't match Dest. Same free-function shape as
 // validateArguments, for the same reason.
+//
+// Validate calls this with the effective Option set
+// (slices.Collect(c.allOptions())), not c.Options, so a user-declared
+// Option colliding with a synthesized built-in is caught here exactly
+// like two user-declared Options colliding. See allOptions' doc
+// comment for the suppression rule that decides which built-ins are
+// even present in that effective set.
 func validateOptions(opts []Option) error {
 	seenFlag := make(map[string]bool, len(opts))
 	seenLong := make(map[string]bool, len(opts))
@@ -1060,8 +1152,9 @@ func (c *Command) PrintUsage() {
 // Arguments is omitted entirely when there are no Arguments.
 // Environment Variables is omitted when no Option or Argument declares
 // an Env name. Options is never omitted -- it always contains at least
-// the synthesized -h/--help entry, plus -v/--version when Version is
-// set, both always listed last.
+// the synthesized -h/--help entry (unless the user-declared Options
+// claim both of its forms -- see allOptions' doc comment), plus
+// -v/--version when Version is set, both always listed last.
 func (c *Command) HelpString() string {
 	var b strings.Builder
 
@@ -1113,8 +1206,9 @@ func (c *Command) HelpString() string {
 	// allOptions() yields the user-declared Options, then the built-in -h/--help
 	// and -v/--version entries (if Version is set). The latter two are always
 	// listed last, so they don't get lost in the middle of a long list of user
-	// flags. Also, the built-in entries are always present, so the Options section
-	// is never empty.
+	// flags. A built-in is omitted only when the user claims both of its
+	// forms (see allOptions' doc comment), in which case a user-declared
+	// Option takes its place, so the Options section is never empty.
 	fmt.Fprintf(&b, "\nOptions:\n")
 	for opt := range c.allOptions() {
 		flag := opt.flag()
