@@ -201,6 +201,48 @@ type Argument struct {
 	Env string
 }
 
+// Action is a hook that runs when its Option's flag is seen on the
+// command line. Parse calls it as opt.Action(c, opt, value): c is the
+// Command being parsed (so an Action can call
+// c.PrintHelp/c.PrintVersion/c.PrintErrorf, exactly like Parse itself
+// does), opt is the matched Option itself (so an Action can refer back
+// to its own Flag/Long/Name/Help, e.g. when building a message through
+// c.PrintErrorf), and value is the same string Parse would hand (or
+// just handed) to Dest.Set: the token consumed from the command line
+// by default, or "true" for a flag that opts out of consuming one --
+// see Dest's doc comment and isBoolFlag; an Action-only Option (no
+// Dest at all) still consumes a value by default, exactly like any
+// other flag, unless its Dest is explicitly set to something
+// boolean-like (a plain BoolVar, even one nothing else ever reads).
+//
+// An Option may set Dest, Action, both, or neither. When both are set,
+// Dest resolves first -- Action only runs if Dest.Set succeeded, and
+// sees the exact same value Dest was just given, so it never needs to
+// re-derive or re-parse anything Dest already handled.
+//
+// An Action's return value tells Parse whether to keep going:
+//
+//	nil              -- parsing continues, exactly as if this were an
+//	                    ordinary Option with no Action.
+//	a non-nil *Error -- parsing stops immediately; Parse returns this
+//	                    *Error as-is, unchanged.
+//
+// This is the same contract PrintErrorf/ErrHelp/ErrVersion already
+// follow, so an Action reports a real parsing/usage error the same way
+// the rest of Parse does -- `return c.PrintErrorf("...", ...)` prints
+// the clap-style block and returns the *Error to return -- and is free
+// to return ErrHelp, ErrVersion, or any other *Error (e.g. built with
+// newError) if that's the exit behavior it wants. This is how the
+// built-in -h/--help and -v/--version flags get their behavior (see
+// allOptions): each binds Dest to a BoolVar over a throwaway bool
+// (never consuming a token, value always "true") and sets Action to a
+// closure that prints and returns ErrHelp/ErrVersion. A caller-declared
+// Option can set its own Action exactly the same way, with no special
+// status over the built-in ones -- optionally alongside a Dest of its
+// own, and opting out of consuming a value the exact same way the
+// built-ins do.
+type Action func(c *Command, opt Option, value string) *Error
+
 // Option describes a single flag (e.g. "-f, --foo"). Unlike Argument, the
 // order of Options in Command.Options has no effect on parsing: flags can
 // appear in any order on the command line.
@@ -230,7 +272,10 @@ type Option struct {
 
 	// Dest binds the parsed value to a variable. See StringVar, BoolVar,
 	// IntVar. A BoolVar binding makes this a boolean flag that never
-	// consumes a following token.
+	// consumes a following token; leaving Dest nil does NOT do the
+	// same when Action is set -- see the Action doc comment. May be
+	// combined with Action -- see the Action doc comment for the exact
+	// resolution order.
 	Dest Value
 
 	// Default is shown in the help text as "(default: ...)" and is
@@ -240,6 +285,14 @@ type Option struct {
 	// Env, if set, is the environment variable consulted when this
 	// option is not provided on the command line.
 	Env string
+
+	// Action, if set, runs when this Option's flag is seen on the
+	// command line -- see the Action doc comment for its exact contract
+	// and how it combines with Dest. Used by allOptions to give its
+	// synthesized -h/--help and -v/--version entries real behavior; a
+	// caller-declared Option can set this too, optionally alongside
+	// Dest, with no special status over the built-in ones.
+	Action Action
 }
 
 // flag returns o.Flag in its normalized short-flag form: a single
@@ -370,12 +423,36 @@ func (c *Command) allOptions() iter.Seq[Option] {
 			}
 		}
 
-		if !yield(Option{Flag: "-h", Long: "--help", Help: "Print help"}) {
+		// -h/--help and -v/--version must never consume a following
+		// token, so each binds Dest to a plain BoolVar -- an Option
+		// with an Action but no Dest otherwise defaults to consuming a
+		// value (see the value-determination comment in Parse), and a
+		// boolean Dest is how any Option opts back out of that, built-in
+		// or not. discard is never read; it exists purely so BoolVar has
+		// somewhere to write "true" -- neither built-in has any value of
+		// its own to store.
+		var discard bool
+
+		if !yield(Option{
+			Flag: "-h", Long: "--help", Help: "Print help",
+			Dest: BoolVar(&discard),
+			Action: func(c *Command, opt Option, value string) *Error {
+				c.PrintHelp()
+				return ErrHelp
+			},
+		}) {
 			return
 		}
 
 		if c.Version != "" {
-			if !yield(Option{Flag: "-v", Long: "--version", Help: "Print version"}) {
+			if !yield(Option{
+				Flag: "-v", Long: "--version", Help: "Print version",
+				Dest: BoolVar(&discard),
+				Action: func(c *Command, opt Option, value string) *Error {
+					c.PrintVersion()
+					return ErrVersion
+				},
+			}) {
 				return
 			}
 		}
@@ -472,6 +549,10 @@ func (c *Command) allDefaults() iter.Seq2[Value, any] {
 //  9. Every environment variable name -- from Arguments' Env, Options'
 //     Env, and EnvVars -- is unique across all three.
 //  10. Same Default/Dest type check as Arguments/Options, for EnvVars.
+//
+// Dest and Action are not checked against each other -- an Option may
+// set neither, either, or both (see Option.Action's doc comment for
+// what setting both means for Parse's dispatch order).
 //
 // A Validate failure never prints anything -- see the package-level
 // design notes for why (a Validate failure is a bug in the caller's Go
@@ -689,11 +770,15 @@ func validateDefaultType(dest Value, def any) error {
 //     applyDefaults step -- see their doc comments. Nothing is
 //     printed.
 //   - a real parsing/usage error (ExitCode() == 2): an unknown or
-//     invalid option/argument, including a bad Env value. Parse prints
-//     a clap-style block to c.Stderr before returning (see below).
+//     invalid option/argument, including a bad Env value, or whatever
+//     *Error a caller-declared Option's Action chose to return. Parse
+//     prints a clap-style block to c.Stderr before returning (see
+//     below) for everything except an Action's own *Error, which
+//     Parse returns exactly as given -- an Action that wants that
+//     same clap-style block builds it itself via c.PrintErrorf.
 //
-// For a real parsing/usage error, Parse prints (via PrintErrorf -- see
-// its doc comment):
+// For a real parsing/usage error Parse builds itself, Parse prints (via
+// PrintErrorf -- see its doc comment):
 //
 //	error: <message>
 //	Usage: myprogram [options] [qux]
@@ -720,9 +805,96 @@ func (c *Command) Parse(args []string) *Error {
 		return err
 	}
 
-	// TODO: implement the actual command-line parsing, including handling
-	// the built-in -h/--help and -v/--version flags, and return the appropriate
-	// *Error values as specified in the doc comment above.
+	// Normalized lookup maps built once, ahead of the token loop, so
+	// each dash-prefixed token below resolves to its Option in O(1)
+	// instead of scanning c.Options per token. Built from allOptions(),
+	// not c.Options directly, so the synthesized -h/--help and
+	// -v/--version entries share this exact same lookup and dispatch
+	// path -- Parse never special-cases their tokens or their
+	// behavior; it just resolves Dest/Action the same way it would for
+	// any other Option.
+	flagOpts := make(map[string]Option, len(c.Options)+2)
+	longOpts := make(map[string]Option, len(c.Options)+2)
+	for opt := range c.allOptions() {
+		if flag := opt.flag(); flag != "" {
+			flagOpts[flag] = opt
+		}
+		if long := opt.long(); long != "" {
+			longOpts[long] = opt
+		}
+	}
+
+	// Classic index loop, not range: consuming a value-taking Option's
+	// value requires advancing i an extra position mid-iteration.
+	argIndex := 0
+	for i := 0; i < len(args); i++ {
+		tok := args[i]
+
+		switch {
+		case strings.HasPrefix(tok, "-"):
+			opt, ok := flagOpts[tok]
+			if !ok {
+				opt, ok = longOpts[tok]
+			}
+			if !ok {
+				return c.PrintErrorf("unknown option %q", tok)
+			}
+
+			// value is what Dest.Set (if Dest is set) and Action (if
+			// Action is set) both receive. The default is to consume
+			// the next token, same as any ordinary value-taking flag
+			// -- including an Action-only Option with no Dest at all,
+			// so an Action always gets a real value unless something
+			// says otherwise. The one thing that says otherwise is
+			// isBoolFlag(opt.Dest): a boolean Dest (BoolVar) makes
+			// this Option boolean-like, so value is just "true" and no
+			// token is consumed. isBoolFlag(nil) is false, so a nil
+			// Dest does NOT opt out on its own -- an Action-only
+			// Option that must never consume a token needs an explicit
+			// BoolVar Dest to say so, the way the built-in -h/--help
+			// and -v/--version do (see allOptions).
+			value := "true"
+			if !isBoolFlag(opt.Dest) {
+				i++
+				if i >= len(args) {
+					return c.PrintErrorf("option %q requires a value", tok)
+				}
+				value = args[i]
+			}
+
+			// Dest resolves first, if set: Action (below) receives the
+			// exact same value, and only runs at all if Dest.Set
+			// succeeded.
+			if opt.Dest != nil {
+				if setErr := opt.Dest.Set(value); setErr != nil {
+					return c.PrintErrorf("option %q: %w", tok, setErr)
+				}
+			}
+
+			// See the Action doc comment for its nil/non-nil contract.
+			if opt.Action != nil {
+				if err := opt.Action(c, opt, value); err != nil {
+					return err
+				}
+			}
+
+		default:
+			// A non-dash token fills the next declared Argument, in
+			// declaration order.
+			if argIndex >= len(c.Arguments) {
+				return c.PrintErrorf("unexpected argument %q", tok)
+			}
+			arg := c.Arguments[argIndex]
+			argIndex++
+
+			if arg.Dest == nil {
+				continue
+			}
+			if setErr := arg.Dest.Set(tok); setErr != nil {
+				return c.PrintErrorf("argument %q: %w", tok, setErr)
+			}
+		}
+	}
 
 	return nil
 }
@@ -842,7 +1014,8 @@ func (c *Command) ErrorString(err error) string {
 // A caller that already holds a plain error rather than building one
 // here can still use PrintErrorf -- pass it through with "%s", err,
 // the same way Validate's own failure is wrapped into a *Error via
-// newError(1, "%s", err).
+// newError(1, "%s", err). A caller-declared Option's Action is a
+// caller too, in exactly this sense -- see the Action doc comment.
 func (c *Command) PrintErrorf(format string, args ...any) *Error {
 	err := fmt.Errorf(format, args...)
 	fmt.Fprint(c.stderr(), c.ErrorString(err))

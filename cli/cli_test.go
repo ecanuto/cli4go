@@ -349,7 +349,33 @@ func TestStderr(t *testing.T) {
 	}
 }
 
+func optionSlicesEqual(a, b []Option) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i].Name != b[i].Name ||
+			a[i].Flag != b[i].Flag ||
+			a[i].Long != b[i].Long ||
+			a[i].Help != b[i].Help ||
+			(a[i].Dest == nil) != (b[i].Dest == nil) ||
+			a[i].Default != b[i].Default ||
+			a[i].Env != b[i].Env ||
+			(a[i].Action == nil) != (b[i].Action == nil) {
+			return false
+		}
+	}
+	return true
+}
+
 func TestAllOptions(t *testing.T) {
+	// A placeholder Action, used only to mark a "want" Option as
+	// carrying one -- optionSlicesEqual compares Action by nil-ness,
+	// not identity, so any non-nil func here works.
+	anyAction := func(*Command, Option, string) *Error { return nil }
+	var discard bool
+	anyDest := BoolVar(&discard)
+
 	tests := []struct {
 		name string
 		cmd  Command
@@ -359,15 +385,15 @@ func TestAllOptions(t *testing.T) {
 			name: "no user options, no version",
 			cmd:  Command{Name: "myprogram"},
 			want: []Option{
-				{Flag: "-h", Long: "--help", Help: "Print help"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
 			name: "no user options, with version",
 			cmd:  Command{Name: "myprogram", Version: "0.1.0"},
 			want: []Option{
-				{Flag: "-h", Long: "--help", Help: "Print help"},
-				{Flag: "-v", Long: "--version", Help: "Print version"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -383,8 +409,8 @@ func TestAllOptions(t *testing.T) {
 			want: []Option{
 				{Flag: "-f", Help: "Enable foo mode"},
 				{Long: "--bar", Help: "Enable bar mode"},
-				{Flag: "-h", Long: "--help", Help: "Print help"},
-				{Flag: "-v", Long: "--version", Help: "Print version"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 	}
@@ -392,7 +418,7 @@ func TestAllOptions(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := slices.Collect(tt.cmd.allOptions())
-			if !slices.Equal(got, tt.want) {
+			if !optionSlicesEqual(got, tt.want) {
 				t.Errorf("allOptions() = %+v, want %+v", got, tt.want)
 			}
 		})
@@ -400,6 +426,10 @@ func TestAllOptions(t *testing.T) {
 }
 
 func TestAllOptions_StopsEarly(t *testing.T) {
+	anyAction := func(*Command, Option, string) *Error { return nil }
+	var discard bool
+	anyDest := BoolVar(&discard)
+
 	cmd := Command{
 		Name:    "myprogram",
 		Version: "0.1.0",
@@ -425,7 +455,7 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 			stopAfter: 2,
 			want: []Option{
 				{Flag: "-f", Help: "Enable foo mode"},
-				{Flag: "-h", Long: "--help", Help: "Print help"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -433,8 +463,8 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 			stopAfter: 3,
 			want: []Option{
 				{Flag: "-f", Help: "Enable foo mode"},
-				{Flag: "-h", Long: "--help", Help: "Print help"},
-				{Flag: "-v", Long: "--version", Help: "Print version"},
+				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 	}
@@ -447,7 +477,7 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 				return len(got) < tt.stopAfter
 			})
 
-			if !slices.Equal(got, tt.want) {
+			if !optionSlicesEqual(got, tt.want) {
 				t.Errorf("allOptions() stopped after %d = %+v, want %+v", tt.stopAfter, got, tt.want)
 			}
 		})
@@ -887,6 +917,14 @@ func TestValidateOptions(t *testing.T) {
 			opts: []Option{{Flag: "f", Long: "foo"}},
 		},
 		{
+			name: "valid, option with Action instead of Dest",
+			opts: []Option{{Flag: "f", Action: func(*Command, Option, string) *Error { return nil }}},
+		},
+		{
+			name: "valid, option with both Dest and Action",
+			opts: []Option{{Flag: "f", Dest: StringVar(&s), Action: func(*Command, Option, string) *Error { return nil }}},
+		},
+		{
 			name:    "option missing both Flag and Long",
 			opts:    []Option{{}},
 			wantErr: true,
@@ -1242,6 +1280,407 @@ func TestParse(t *testing.T) {
 		}
 		if got, want := err.ExitCode(), 1; got != want {
 			t.Errorf("ExitCode() = %d, want %d", got, want)
+		}
+	})
+}
+
+// TestParse_TokenLoop covers step 3-5 of the Parse algorithm: the
+// actual token loop, resolving Options (built-in and user-declared
+// alike, through the same flagOpts/longOpts lookup) and positional
+// Arguments from a real args slice.
+func TestParse_TokenLoop(t *testing.T) {
+	t.Run("-h prints help and returns ErrHelp", func(t *testing.T) {
+		var buf bytes.Buffer
+		c := &Command{Name: "myprogram", Stdout: &buf}
+
+		err := c.Parse([]string{"-h"})
+		if !errors.Is(err, ErrHelp) {
+			t.Fatalf("Parse() = %v, want ErrHelp", err)
+		}
+		if got, want := buf.String(), c.HelpString(); got != want {
+			t.Errorf("Parse() wrote %q to Stdout, want %q", got, want)
+		}
+	})
+
+	t.Run("--help, long form, behaves the same as -h", func(t *testing.T) {
+		c := &Command{Name: "myprogram", Stdout: &bytes.Buffer{}}
+
+		if err := c.Parse([]string{"--help"}); !errors.Is(err, ErrHelp) {
+			t.Errorf("Parse() = %v, want ErrHelp", err)
+		}
+	})
+
+	t.Run("-v prints version and returns ErrVersion, when Version is set", func(t *testing.T) {
+		var buf bytes.Buffer
+		c := &Command{Name: "myprogram", Version: "0.1.0", Stdout: &buf}
+
+		err := c.Parse([]string{"-v"})
+		if !errors.Is(err, ErrVersion) {
+			t.Fatalf("Parse() = %v, want ErrVersion", err)
+		}
+		if got, want := buf.String(), c.VersionString()+"\n"; got != want {
+			t.Errorf("Parse() wrote %q to Stdout, want %q", got, want)
+		}
+	})
+
+	t.Run("-v is an unknown option when Version is unset", func(t *testing.T) {
+		var buf bytes.Buffer
+		c := &Command{Name: "myprogram", Stderr: &buf}
+
+		err := c.Parse([]string{"-v"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `unknown option "-v"`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("unknown option", func(t *testing.T) {
+		var buf bytes.Buffer
+		c := &Command{Name: "myprogram", Stderr: &buf}
+
+		err := c.Parse([]string{"--nope"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `unknown option "--nope"`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+		if got, want := buf.String(), c.ErrorString(errors.New(`unknown option "--nope"`)); got != want {
+			t.Errorf("Parse() wrote %q to Stderr, want %q", got, want)
+		}
+	})
+
+	t.Run("bool flag: presence alone sets it, without consuming the next token", func(t *testing.T) {
+		var foo bool
+		var qux string
+		c := &Command{
+			Name:      "myprogram",
+			Options:   []Option{{Flag: "-f", Dest: BoolVar(&foo)}},
+			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+		}
+
+		if err := c.Parse([]string{"-f", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !foo {
+			t.Error("foo = false, want true")
+		}
+		if qux != "hello" {
+			t.Errorf("qux = %q, want %q -- bool flag must not consume the next token", qux, "hello")
+		}
+	})
+
+	t.Run("value-taking option consumes the next token", func(t *testing.T) {
+		var bar string
+		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}}}
+
+		if err := c.Parse([]string{"--bar", "value"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if bar != "value" {
+			t.Errorf("bar = %q, want %q", bar, "value")
+		}
+	})
+
+	t.Run("value-taking option missing its value", func(t *testing.T) {
+		var bar string
+		var buf bytes.Buffer
+		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b", Dest: StringVar(&bar)}}, Stderr: &buf}
+
+		err := c.Parse([]string{"-b"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `option "-b" requires a value`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("value-taking option, invalid value", func(t *testing.T) {
+		var n int
+		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-n", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
+
+		err := c.Parse([]string{"-n", "not-a-number"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `option "-n": invalid integer value "not-a-number": strconv.Atoi: parsing "not-a-number": invalid syntax`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("positional argument fills the next declared Argument, in order", func(t *testing.T) {
+		var a, b string
+		c := &Command{
+			Name: "myprogram",
+			Arguments: []Argument{
+				{Name: "first", Dest: StringVar(&a)},
+				{Name: "second", Dest: StringVar(&b)},
+			},
+		}
+
+		if err := c.Parse([]string{"one", "two"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if a != "one" || b != "two" {
+			t.Errorf("a, b = %q, %q, want %q, %q", a, b, "one", "two")
+		}
+	})
+
+	t.Run("more positional tokens than declared Arguments", func(t *testing.T) {
+		c := &Command{Name: "myprogram", Stderr: &bytes.Buffer{}}
+
+		err := c.Parse([]string{"extra"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `unexpected argument "extra"`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("positional argument, invalid value", func(t *testing.T) {
+		var n int
+		c := &Command{Name: "myprogram", Arguments: []Argument{{Name: "num", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
+
+		err := c.Parse([]string{"not-a-number"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `argument "not-a-number": invalid integer value "not-a-number": strconv.Atoi: parsing "not-a-number": invalid syntax`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("Argument with no Dest is still consumed positionally, just not bound", func(t *testing.T) {
+		c := &Command{Name: "myprogram", Arguments: []Argument{{Name: "qux"}}}
+
+		if err := c.Parse([]string{"anything"}); err != nil {
+			t.Errorf("Parse() = %v, want nil", err)
+		}
+	})
+
+	t.Run("options and arguments mixed together", func(t *testing.T) {
+		var foo bool
+		var qux string
+		c := &Command{
+			Name:      "myprogram",
+			Options:   []Option{{Flag: "-f", Dest: BoolVar(&foo)}},
+			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+		}
+
+		if err := c.Parse([]string{"-f", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !foo || qux != "hello" {
+			t.Errorf("foo, qux = %v, %q, want %v, %q", foo, qux, true, "hello")
+		}
+	})
+
+	t.Run("a caller-declared Option's Action fires, same as a built-in", func(t *testing.T) {
+		var ran bool
+		var seen Option
+		var seenValue string
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{
+				{
+					Flag: "-x", Long: "--extra",
+					Action: func(c *Command, opt Option, value string) *Error {
+						ran = true
+						seen = opt
+						seenValue = value
+						return nil
+					},
+				},
+			},
+		}
+
+		if err := c.Parse([]string{"-x", "something"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !ran {
+			t.Fatal("Action did not run")
+		}
+		if seen.Flag != "-x" || seen.Long != "--extra" {
+			t.Errorf("Action received Option %+v, want Flag=-x Long=--extra", seen)
+		}
+		if seenValue != "something" {
+			t.Errorf("Action received value = %q, want %q -- an Option with Action but no Dest consumes a value by default", seenValue, "something")
+		}
+	})
+
+	t.Run("Action returning nil lets parsing continue past its own consumed value", func(t *testing.T) {
+		var ran bool
+		var seenValue string
+		var qux string
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{
+				{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { ran = true; seenValue = value; return nil }},
+			},
+			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+		}
+
+		if err := c.Parse([]string{"-x", "consumed", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !ran {
+			t.Fatal("Action did not run")
+		}
+		if seenValue != "consumed" {
+			t.Errorf("Action received value = %q, want %q", seenValue, "consumed")
+		}
+		if qux != "hello" {
+			t.Errorf("qux = %q, want %q -- parsing should have continued past -x's own value", qux, "hello")
+		}
+	})
+
+	t.Run("Action returning a non-nil *Error stops parsing immediately", func(t *testing.T) {
+		var later bool
+		sentinel := errors.New("boom")
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{
+				{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { return newError(2, "%s", sentinel) }},
+				{Flag: "-y", Dest: BoolVar(&later)},
+			},
+		}
+
+		err := c.Parse([]string{"-x", "ignored", "-y"})
+		if err == nil {
+			t.Fatal("Parse() = nil, want error")
+		}
+		if err.ExitCode() != 2 || err.Error() != sentinel.Error() {
+			t.Errorf("Parse() = %v (code %d), want %q (code 2)", err, err.ExitCode(), sentinel.Error())
+		}
+		if later {
+			t.Error("-y was processed after Action stopped parsing, want it skipped")
+		}
+	})
+
+	t.Run("Dest and Action combined: Dest fires first, Action receives the same value", func(t *testing.T) {
+		var bar string
+		var seenViaAction string
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{{
+				Flag: "-b", Dest: StringVar(&bar),
+				Action: func(c *Command, opt Option, value string) *Error {
+					seenViaAction = value
+					return nil
+				},
+			}},
+		}
+
+		if err := c.Parse([]string{"-b", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if bar != "hello" {
+			t.Errorf("Dest = %q, want %q", bar, "hello")
+		}
+		if seenViaAction != "hello" {
+			t.Errorf("Action received value = %q, want %q", seenViaAction, "hello")
+		}
+	})
+
+	t.Run("Dest and Action combined, boolean flag: Action receives \"true\"", func(t *testing.T) {
+		var foo bool
+		var seenViaAction string
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{{
+				Flag: "-f", Dest: BoolVar(&foo),
+				Action: func(c *Command, opt Option, value string) *Error {
+					seenViaAction = value
+					return nil
+				},
+			}},
+		}
+
+		if err := c.Parse([]string{"-f"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !foo {
+			t.Error("Dest = false, want true")
+		}
+		if seenViaAction != "true" {
+			t.Errorf("Action received value = %q, want %q", seenViaAction, "true")
+		}
+	})
+
+	t.Run("Action-only Option (no Dest) consumes the next token by default", func(t *testing.T) {
+		var seenValue string
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{{
+				Flag: "-x",
+				Action: func(c *Command, opt Option, value string) *Error {
+					seenValue = value
+					return nil
+				},
+			}},
+		}
+
+		if err := c.Parse([]string{"-x", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if seenValue != "hello" {
+			t.Errorf("Action received value = %q, want %q", seenValue, "hello")
+		}
+	})
+
+	t.Run("a boolean Dest opts an Action-only Option out of the default consuming behavior", func(t *testing.T) {
+		var seenValue string
+		var qux string
+		var triggered bool
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{{
+				Flag: "-x",
+				Dest: BoolVar(&triggered),
+				Action: func(c *Command, opt Option, value string) *Error {
+					seenValue = value
+					return nil
+				},
+			}},
+			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+		}
+
+		if err := c.Parse([]string{"-x", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !triggered {
+			t.Error("Dest = false, want true")
+		}
+		if seenValue != "true" {
+			t.Errorf("Action received value = %q, want %q", seenValue, "true")
+		}
+		if qux != "hello" {
+			t.Errorf("qux = %q, want %q -- -x with a boolean Dest must not consume a token", qux, "hello")
+		}
+	})
+
+	t.Run("Dest and Action combined: a Dest.Set failure prevents Action from running", func(t *testing.T) {
+		var n int
+		var ran bool
+		c := &Command{
+			Name: "myprogram",
+			Options: []Option{{
+				Flag: "-n", Dest: IntVar(&n),
+				Action: func(c *Command, opt Option, value string) *Error { ran = true; return nil },
+			}},
+			Stderr: &bytes.Buffer{},
+		}
+
+		err := c.Parse([]string{"-n", "not-a-number"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if ran {
+			t.Error("Action ran after Dest.Set failed, want it skipped")
 		}
 	})
 }
