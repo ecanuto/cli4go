@@ -89,7 +89,7 @@ func (b *boolValue) Set(val string) error {
 	return nil
 }
 
-// IsBoolFlag reports that boolValue never consumes a following token —
+// IsBoolFlag reports that boolValue never consumes a following token --
 // its mere presence on the command line is enough to set it to true.
 // This satisfies the unexported interface Parse checks for via
 // isBoolFlag, mirroring the standard library flag package's own
