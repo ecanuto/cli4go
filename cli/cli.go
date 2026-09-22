@@ -1003,23 +1003,13 @@ func (c *Command) Parse(args []string) *Error {
 		return err
 	}
 
-	// Normalized lookup map built once, ahead of the token loop, so
-	// each dash-prefixed token below resolves to its Option in O(1)
-	// instead of scanning c.Options per token. Built from options(),
-	// not c.Options directly, so the synthesized -h/--help and
-	// -v/--version entries share this exact same lookup and dispatch
-	// path -- Parse never special-cases their tokens or their
-	// behavior; it just resolves Dest/Action the same way it would for
-	// any other Option.
-	//
-	// A single map, not one per form: a normalized Flag is always
-	// exactly 2 characters, a dash followed by one non-dash character
-	// (normalizeDashes trims every leading dash before re-adding
-	// exactly one, and Validate rejects anything that doesn't end up
-	// exactly 2 characters long), while a normalized Long always
-	// starts with "--". The two key spaces can never overlap, so both
-	// forms safely share one map -- an Option with both Flag and Long
-	// set simply gets two keys pointing at the same Option value.
+	// Lookup map built once so each token below resolves to its Option
+	// in O(1). Built from options(), not c.Options, so the built-in
+	// -h/--help and -v/--version go through the same lookup and
+	// dispatch as any other Option. A normalized Flag and Long never
+	// collide (Flag is always 2 chars, Long always starts with "--"),
+	// so one map safely holds both -- an Option with both set just
+	// gets two keys pointing at it.
 	opts := make(map[string]Option, (len(c.Options)+2)*2)
 	for opt := range c.options() {
 		if flag := opt.flag(); flag != "" {
@@ -1038,13 +1028,9 @@ func (c *Command) Parse(args []string) *Error {
 
 		switch {
 		case strings.HasPrefix(tok, "-"):
-			// "--bar=value" attaches its value directly to a long-form
-			// token, ahead of the ordinary lookup below. Only "--" tokens
-			// are split this way -- a short "-b=value" is left alone and
-			// falls through to the ordinary lookup below, where it's just
-			// an unrecognized flag string. Cut on the first "=" only, so a
-			// value that itself contains "=" (e.g. "--bar=a=b") keeps
-			// everything after the first one.
+			// "--bar=value" splits off its value before the lookup below;
+			// only long ("--") tokens split this way. Cut on the first
+			// "=" only, so a value containing "=" keeps the rest intact.
 			key := tok
 			var value string
 			hasValue := false
@@ -1059,24 +1045,13 @@ func (c *Command) Parse(args []string) *Error {
 				return c.PrintErrorf("unknown option %q", tok)
 			}
 
-			// value is what Dest.Set (if Dest is set) and Action (if
-			// Action is set) both receive. hasValue true (an attached
-			// "=value") always wins over the *BoolOption check below --
-			// that's how "--flag=false" is able to override a boolean
-			// Dest explicitly, instead of the bare-presence "true" a bool
-			// flag gets otherwise. Absent an attached value, the default
-			// is to consume the next token, same as any ordinary
-			// value-taking flag -- including an Action-only Option with
-			// no Dest at all, so an Action always gets a real value
-			// unless something says otherwise. The one thing that says
-			// otherwise is opt's own concrete type: a *BoolOption never
-			// consumes a token, so value is just "true" regardless of
-			// what its Dest is (or whether it has one at all) -- the
-			// type itself is the boolean-ness signal, not a runtime check
-			// on Dest (see BoolOption's doc comment above). An
-			// Action-only Option that must never consume a token needs
-			// to be declared as a *BoolOption to say so, the way the
-			// built-in -h/--help and -v/--version do (see options).
+			// value is what Dest.Set and Action both receive. hasValue
+			// (an attached "=value") wins over the *BoolOption check
+			// below, so "--flag=false" can override a boolean Dest
+			// explicitly. Otherwise the next token is consumed as the
+			// value, unless opt is a *BoolOption -- its type alone marks
+			// it as taking no token (see BoolOption's doc comment),
+			// giving value "true" instead.
 			if !hasValue {
 				value = "true"
 				if _, ok := opt.(*BoolOption); !ok {
