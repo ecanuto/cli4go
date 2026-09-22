@@ -55,8 +55,31 @@ func main() {
 		os.Exit(err.ExitCode())
 	}
 
-	fmt.Printf("%s: foo=%v bar=%q qux=%q\n", prg.Name, cfg.Foo, cfg.Bar, cfg.Qux)
+	fmt.Printf("%s: foo=%v, bar=%q, qux=%q\n", prg.Name, cfg.Foo, cfg.Bar, cfg.Qux)
 }
+```
+
+```console
+$ go build -o myprogram .
+$ ./myprogram --help
+Usage: myprogram [options] [qux]
+
+My foo bar program
+
+Arguments:
+  qux               The qux to operate on
+
+Options:
+  -f, --foo         Enable foo mode
+  -b, --bar <BAR>   Set the bar value (default: "default-bar")
+  -h, --help        Print help
+  -v, --version     Print version
+
+Environment Variables:
+  PROGRAM_BAR       Set the bar value (default: "default-bar")
+
+$ ./myprogram -f -b hello widget-42
+myprogram: foo=true, bar="hello", qux="widget-42"
 ```
 
 ## Installation

@@ -57,5 +57,5 @@ func main() {
 	}
 
 	// Print the parsed values.
-	fmt.Printf("%s:\n\nfoo=%v\nbar=%q\nqux=%q\n", prg.Name, cfg.Foo, cfg.Bar, cfg.Qux)
+	fmt.Printf("%s: foo=%v, bar=%q, qux=%q\n", prg.Name, cfg.Foo, cfg.Bar, cfg.Qux)
 }
