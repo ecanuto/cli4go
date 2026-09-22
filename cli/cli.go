@@ -1003,7 +1003,7 @@ func (c *Command) Parse(args []string) *Error {
 		return err
 	}
 
-	// Normalized lookup maps built once, ahead of the token loop, so
+	// Normalized lookup map built once, ahead of the token loop, so
 	// each dash-prefixed token below resolves to its Option in O(1)
 	// instead of scanning c.Options per token. Built from options(),
 	// not c.Options directly, so the synthesized -h/--help and
@@ -1011,14 +1011,22 @@ func (c *Command) Parse(args []string) *Error {
 	// path -- Parse never special-cases their tokens or their
 	// behavior; it just resolves Dest/Action the same way it would for
 	// any other Option.
-	flagOpts := make(map[string]Option, len(c.Options)+2)
-	longOpts := make(map[string]Option, len(c.Options)+2)
+	//
+	// A single map, not one per form: a normalized Flag is always
+	// exactly 2 characters, a dash followed by one non-dash character
+	// (normalizeDashes trims every leading dash before re-adding
+	// exactly one, and Validate rejects anything that doesn't end up
+	// exactly 2 characters long), while a normalized Long always
+	// starts with "--". The two key spaces can never overlap, so both
+	// forms safely share one map -- an Option with both Flag and Long
+	// set simply gets two keys pointing at the same Option value.
+	opts := make(map[string]Option, (len(c.Options)+2)*2)
 	for opt := range c.options() {
 		if flag := opt.flag(); flag != "" {
-			flagOpts[flag] = opt
+			opts[flag] = opt
 		}
 		if long := opt.long(); long != "" {
-			longOpts[long] = opt
+			opts[long] = opt
 		}
 	}
 
@@ -1046,10 +1054,7 @@ func (c *Command) Parse(args []string) *Error {
 				}
 			}
 
-			opt, ok := flagOpts[key]
-			if !ok {
-				opt, ok = longOpts[key]
-			}
+			opt, ok := opts[key]
 			if !ok {
 				return c.PrintErrorf("unknown option %q", tok)
 			}
