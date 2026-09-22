@@ -1,5 +1,7 @@
 # cli4go
 
+[![CI](https://github.com/ecanuto/cli4go/actions/workflows/ci.yml/badge.svg)](https://github.com/ecanuto/cli4go/actions/workflows/ci.yml)
+
 A declarative, struct-based CLI toolkit for Go.
 
 `cli4go` lets you describe a command-line program as plain data -- a
