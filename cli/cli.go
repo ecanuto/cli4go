@@ -850,6 +850,14 @@ func validateDefaultType(dest Value, def any) error {
 // Command.Version is set) -- neither is declared in Command.Options by
 // the developer.
 //
+// A long-form Option's value can be attached directly to its own
+// token -- "--bar=value" is equivalent to "--bar" "value" -- for both
+// a value-taking Option and a boolean one (where it overrides the
+// bare-presence "true", e.g. "--verbose=false"). This form is
+// long-only: a short-form token like "-b=value" is not split and is
+// looked up as-is, so it fails as an unknown option unless something
+// is literally flagged "-b=value".
+//
 // Parse returns:
 //   - nil: parsing succeeded.
 //   - ErrHelp / ErrVersion (ExitCode() == 0): a built-in action fired;
@@ -924,34 +932,56 @@ func (c *Command) Parse(args []string) *Error {
 
 		switch {
 		case strings.HasPrefix(tok, "-"):
-			opt, ok := flagOpts[tok]
+			// "--bar=value" attaches its value directly to a long-form
+			// token, ahead of the ordinary lookup below. Only "--" tokens
+			// are split this way -- a short "-b=value" is left alone and
+			// falls through to the ordinary lookup below, where it's just
+			// an unrecognized flag string. Cut on the first "=" only, so a
+			// value that itself contains "=" (e.g. "--bar=a=b") keeps
+			// everything after the first one.
+			key := tok
+			var value string
+			hasValue := false
+			if strings.HasPrefix(tok, "--") {
+				if k, v, ok := strings.Cut(tok, "="); ok {
+					key, value, hasValue = k, v, true
+				}
+			}
+
+			opt, ok := flagOpts[key]
 			if !ok {
-				opt, ok = longOpts[tok]
+				opt, ok = longOpts[key]
 			}
 			if !ok {
 				return c.PrintErrorf("unknown option %q", tok)
 			}
 
 			// value is what Dest.Set (if Dest is set) and Action (if
-			// Action is set) both receive. The default is to consume
-			// the next token, same as any ordinary value-taking flag
-			// -- including an Action-only Option with no Dest at all,
-			// so an Action always gets a real value unless something
-			// says otherwise. The one thing that says otherwise is
-			// isBoolFlag(opt.Dest): a boolean Dest (BoolVar) makes
-			// this Option boolean-like, so value is just "true" and no
-			// token is consumed. isBoolFlag(nil) is false, so a nil
-			// Dest does NOT opt out on its own -- an Action-only
+			// Action is set) both receive. hasValue true (an attached
+			// "=value") always wins over the isBoolFlag check below --
+			// that's how "--flag=false" is able to override a boolean
+			// Dest explicitly, instead of the bare-presence "true" a bool
+			// flag gets otherwise. Absent an attached value, the default
+			// is to consume the next token, same as any ordinary
+			// value-taking flag -- including an Action-only Option with
+			// no Dest at all, so an Action always gets a real value
+			// unless something says otherwise. The one thing that says
+			// otherwise is isBoolFlag(opt.Dest): a boolean Dest (BoolVar)
+			// makes this Option boolean-like, so value is just "true"
+			// and no token is consumed. isBoolFlag(nil) is false, so a
+			// nil Dest does NOT opt out on its own -- an Action-only
 			// Option that must never consume a token needs an explicit
-			// BoolVar Dest to say so, the way the built-in -h/--help
-			// and -v/--version do (see allOptions).
-			value := "true"
-			if !isBoolFlag(opt.Dest) {
-				i++
-				if i >= len(args) {
-					return c.PrintErrorf("option %q requires a value", tok)
+			// BoolVar Dest to say so, the way the built-in -h/--help and
+			// -v/--version do (see allOptions).
+			if !hasValue {
+				value = "true"
+				if !isBoolFlag(opt.Dest) {
+					i++
+					if i >= len(args) {
+						return c.PrintErrorf("option %q requires a value", tok)
+					}
+					value = args[i]
 				}
-				value = args[i]
 			}
 
 			// Dest resolves first, if set: Action (below) receives the

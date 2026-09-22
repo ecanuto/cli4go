@@ -1716,6 +1716,95 @@ func TestParse_TokenLoop(t *testing.T) {
 		}
 	})
 
+	t.Run("--bar=value attaches the value without consuming the next token", func(t *testing.T) {
+		var bar, qux string
+		c := &Command{
+			Name:      "myprogram",
+			Options:   []Option{{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}},
+			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+		}
+
+		if err := c.Parse([]string{"--bar=value", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if bar != "value" {
+			t.Errorf("bar = %q, want %q", bar, "value")
+		}
+		if qux != "hello" {
+			t.Errorf(`qux = %q, want %q -- "--bar=value" must not consume the next token`, qux, "hello")
+		}
+	})
+
+	t.Run("--bar= attaches an empty value, still without consuming the next token", func(t *testing.T) {
+		var bar, qux string
+		c := &Command{
+			Name:      "myprogram",
+			Options:   []Option{{Long: "--bar", Dest: StringVar(&bar)}},
+			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+		}
+
+		if err := c.Parse([]string{"--bar=", "hello"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if bar != "" {
+			t.Errorf("bar = %q, want empty string", bar)
+		}
+		if qux != "hello" {
+			t.Errorf("qux = %q, want %q", qux, "hello")
+		}
+	})
+
+	t.Run("--bar=a=b splits only on the first =", func(t *testing.T) {
+		var bar string
+		c := &Command{Name: "myprogram", Options: []Option{{Long: "--bar", Dest: StringVar(&bar)}}}
+
+		if err := c.Parse([]string{"--bar=a=b"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if bar != "a=b" {
+			t.Errorf("bar = %q, want %q", bar, "a=b")
+		}
+	})
+
+	t.Run("--flag=false overrides a boolean Dest's bare-presence true", func(t *testing.T) {
+		var verbose bool
+		c := &Command{Name: "myprogram", Options: []Option{{Long: "--verbose", Dest: BoolVar(&verbose)}}}
+
+		if err := c.Parse([]string{"--verbose=false"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if verbose {
+			t.Error(`verbose = true, want false -- "--verbose=false" must override the bare-presence default`)
+		}
+	})
+
+	t.Run(`-b=value is not split -- "=" merging is long-form only`, func(t *testing.T) {
+		var b string
+		var buf bytes.Buffer
+		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b", Dest: StringVar(&b)}}, Stderr: &buf}
+
+		err := c.Parse([]string{"-b=value"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `unknown option "-b=value"`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+	})
+
+	t.Run("unknown long option with an attached value: the full token is echoed", func(t *testing.T) {
+		var buf bytes.Buffer
+		c := &Command{Name: "myprogram", Stderr: &buf}
+
+		err := c.Parse([]string{"--nope=value"})
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+		if want := `unknown option "--nope=value"`; err.Error() != want {
+			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
+		}
+	})
+
 	t.Run("positional argument fills the next declared Argument, in order", func(t *testing.T) {
 		var a, b string
 		c := &Command{
