@@ -809,8 +809,7 @@ func validateArguments(args []Argument) error {
 // comment for the suppression rule that decides which built-ins are
 // even present in that effective set.
 func validateOptions(opts []Option) error {
-	seenFlag := make(map[string]bool, len(opts))
-	seenLong := make(map[string]bool, len(opts))
+	seen := make(map[string]bool, len(opts)*2)
 	for _, opt := range opts {
 		// Compare Flag/Long in their normalized form, so "-f"/"f" or
 		// "--bar"/"bar" on two different Options are correctly treated
@@ -832,20 +831,20 @@ func validateOptions(opts []Option) error {
 			if len(flag) != 2 {
 				return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
 			}
-			if seenFlag[flag] {
+			if seen[flag] {
 				return fmt.Errorf("cli: duplicate option flag form %q", flag)
 			}
-			seenFlag[flag] = true
+			seen[flag] = true
 		}
 
 		if long != "" {
 			// Same reasoning as Flag above: Parse looks up an incoming
 			// "--xxx" token by its normalized form, so Long must be
 			// unique across Options too.
-			if seenLong[long] {
+			if seen[long] {
 				return fmt.Errorf("cli: duplicate option long form %q", long)
 			}
-			seenLong[long] = true
+			seen[long] = true
 		}
 
 		if err := validateDefaultType(opt.dest(), opt.defaultValue()); err != nil {
