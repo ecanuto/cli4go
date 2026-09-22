@@ -135,23 +135,6 @@ func TestBoolVar_String(t *testing.T) {
 	}
 }
 
-func TestIsBoolFlag(t *testing.T) {
-	var b bool
-	if !isBoolFlag(BoolVar(&b)) {
-		t.Error("isBoolFlag(BoolVar(...)) = false, want true")
-	}
-
-	var s string
-	if isBoolFlag(StringVar(&s)) {
-		t.Error("isBoolFlag(StringVar(...)) = true, want false")
-	}
-
-	var i int
-	if isBoolFlag(IntVar(&i)) {
-		t.Error("isBoolFlag(IntVar(...)) = true, want false")
-	}
-}
-
 // --- Errors ------------------------------------------------------------------
 
 func TestNewError(t *testing.T) {
@@ -285,7 +268,7 @@ func TestOptionFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := (Option{Flag: tt.input}).flag(); got != tt.want {
+			if got := (&StringOption{Flag: tt.input}).flag(); got != tt.want {
 				t.Errorf("Option{Flag: %q}.flag() = %q, want %q", tt.input, got, tt.want)
 			}
 		})
@@ -306,7 +289,7 @@ func TestOptionLong(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := (Option{Long: tt.input}).long(); got != tt.want {
+			if got := (&StringOption{Long: tt.input}).long(); got != tt.want {
 				t.Errorf("Option{Long: %q}.long() = %q, want %q", tt.input, got, tt.want)
 			}
 		})
@@ -354,21 +337,21 @@ func optionSlicesEqual(a, b []Option) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Name != b[i].Name ||
-			a[i].Flag != b[i].Flag ||
-			a[i].Long != b[i].Long ||
-			a[i].Help != b[i].Help ||
-			(a[i].Dest == nil) != (b[i].Dest == nil) ||
-			a[i].Default != b[i].Default ||
-			a[i].Env != b[i].Env ||
-			(a[i].Action == nil) != (b[i].Action == nil) {
+		if a[i].name() != b[i].name() ||
+			a[i].flag() != b[i].flag() ||
+			a[i].long() != b[i].long() ||
+			a[i].help() != b[i].help() ||
+			(a[i].dest() == nil) != (b[i].dest() == nil) ||
+			a[i].defaultValue() != b[i].defaultValue() ||
+			a[i].env() != b[i].env() ||
+			(a[i].action() == nil) != (b[i].action() == nil) {
 			return false
 		}
 	}
 	return true
 }
 
-func TestAllOptions(t *testing.T) {
+func TestOptions(t *testing.T) {
 	// A placeholder Action, used only to mark a "want" Option as
 	// carrying one -- optionSlicesEqual compares Action by nil-ness,
 	// not identity, so any non-nil func here works.
@@ -385,15 +368,15 @@ func TestAllOptions(t *testing.T) {
 			name: "no user options, no version",
 			cmd:  Command{Name: "myprogram"},
 			want: []Option{
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
 			name: "no user options, with version",
 			cmd:  Command{Name: "myprogram", Version: "0.1.0"},
 			want: []Option{
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
-				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&BoolOption{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -402,15 +385,15 @@ func TestAllOptions(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-f", Help: "Enable foo mode"},
-					{Long: "--bar", Help: "Enable bar mode"},
+					&StringOption{Flag: "-f", Help: "Enable foo mode"},
+					&StringOption{Long: "--bar", Help: "Enable bar mode"},
 				},
 			},
 			want: []Option{
-				{Flag: "-f", Help: "Enable foo mode"},
-				{Long: "--bar", Help: "Enable bar mode"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
-				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-f", Help: "Enable foo mode"},
+				&StringOption{Long: "--bar", Help: "Enable bar mode"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&BoolOption{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -418,11 +401,11 @@ func TestAllOptions(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Options: []Option{
-					{Flag: "-h", Long: "--help", Help: "Custom help"},
+					&StringOption{Flag: "-h", Long: "--help", Help: "Custom help"},
 				},
 			},
 			want: []Option{
-				{Flag: "-h", Long: "--help", Help: "Custom help"},
+				&StringOption{Flag: "-h", Long: "--help", Help: "Custom help"},
 			},
 		},
 		{
@@ -431,12 +414,12 @@ func TestAllOptions(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-v", Long: "--version", Help: "Custom version"},
+					&StringOption{Flag: "-v", Long: "--version", Help: "Custom version"},
 				},
 			},
 			want: []Option{
-				{Flag: "-v", Long: "--version", Help: "Custom version"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-v", Long: "--version", Help: "Custom version"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -445,13 +428,13 @@ func TestAllOptions(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-h", Long: "--help", Help: "Custom help"},
-					{Flag: "-v", Long: "--version", Help: "Custom version"},
+					&StringOption{Flag: "-h", Long: "--help", Help: "Custom help"},
+					&StringOption{Flag: "-v", Long: "--version", Help: "Custom version"},
 				},
 			},
 			want: []Option{
-				{Flag: "-h", Long: "--help", Help: "Custom help"},
-				{Flag: "-v", Long: "--version", Help: "Custom version"},
+				&StringOption{Flag: "-h", Long: "--help", Help: "Custom help"},
+				&StringOption{Flag: "-v", Long: "--version", Help: "Custom version"},
 			},
 		},
 		{
@@ -459,12 +442,12 @@ func TestAllOptions(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Options: []Option{
-					{Flag: "-v", Long: "--version", Help: "Custom version"},
+					&StringOption{Flag: "-v", Long: "--version", Help: "Custom version"},
 				},
 			},
 			want: []Option{
-				{Flag: "-v", Long: "--version", Help: "Custom version"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-v", Long: "--version", Help: "Custom version"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -473,13 +456,13 @@ func TestAllOptions(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+					&StringOption{Flag: "-v", Long: "--verbose", Help: "Verbose"},
 				},
 			},
 			want: []Option{
-				{Flag: "-v", Long: "--verbose", Help: "Verbose"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
-				{Flag: "-V", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&BoolOption{Flag: "-V", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -488,15 +471,15 @@ func TestAllOptions(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-v", Long: "--verbose", Help: "Verbose"},
-					{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+					&StringOption{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+					&StringOption{Flag: "-V", Long: "--vv", Help: "Very verbose"},
 				},
 			},
 			want: []Option{
-				{Flag: "-v", Long: "--verbose", Help: "Verbose"},
-				{Flag: "-V", Long: "--vv", Help: "Very verbose"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
-				{Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+				&StringOption{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&BoolOption{Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -505,35 +488,35 @@ func TestAllOptions(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+					&StringOption{Flag: "-V", Long: "--vv", Help: "Very verbose"},
 				},
 			},
 			want: []Option{
-				{Flag: "-V", Long: "--vv", Help: "Very verbose"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
-				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&BoolOption{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
 			name: "user claims -h only: help built-in NOT suppressed (collision)",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Flag: "-h"}},
+				Options: []Option{&StringOption{Flag: "-h"}},
 			},
 			want: []Option{
-				{Flag: "-h"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-h"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
 			name: "user claims --help only: help built-in NOT suppressed (collision)",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Long: "--help"}},
+				Options: []Option{&StringOption{Long: "--help"}},
 			},
 			want: []Option{
-				{Long: "--help"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&StringOption{Long: "--help"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
@@ -545,40 +528,40 @@ func TestAllOptions(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-h"},
-					{Long: "--help"},
+					&StringOption{Flag: "-h"},
+					&StringOption{Long: "--help"},
 				},
 			},
 			want: []Option{
-				{Flag: "-h"},
-				{Long: "--help"},
-				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-h"},
+				&StringOption{Long: "--help"},
+				&BoolOption{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
 			name: "user claims -h only: no -H fallback for help",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Flag: "-h", Long: "--host", Help: "Host"}},
+				Options: []Option{&StringOption{Flag: "-h", Long: "--host", Help: "Host"}},
 			},
 			want: []Option{
-				{Flag: "-h", Long: "--host", Help: "Host"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-h", Long: "--host", Help: "Host"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := slices.Collect(tt.cmd.allOptions())
+			got := slices.Collect(tt.cmd.options())
 			if !optionSlicesEqual(got, tt.want) {
-				t.Errorf("allOptions() = %+v, want %+v", got, tt.want)
+				t.Errorf("options() = %+v, want %+v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestAllOptions_StopsEarly(t *testing.T) {
+func TestOptions_StopsEarly(t *testing.T) {
 	anyAction := func(*Command, Option, string) *Error { return nil }
 	var discard bool
 	anyDest := BoolVar(&discard)
@@ -587,7 +570,7 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 		Name:    "myprogram",
 		Version: "0.1.0",
 		Options: []Option{
-			{Flag: "-f", Help: "Enable foo mode"},
+			&StringOption{Flag: "-f", Help: "Enable foo mode"},
 		},
 	}
 
@@ -600,24 +583,24 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 			name:      "stops inside the user-declared Options",
 			stopAfter: 1,
 			want: []Option{
-				{Flag: "-f", Help: "Enable foo mode"},
+				&StringOption{Flag: "-f", Help: "Enable foo mode"},
 			},
 		},
 		{
 			name:      "stops right after the synthesized -h/--help",
 			stopAfter: 2,
 			want: []Option{
-				{Flag: "-f", Help: "Enable foo mode"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-f", Help: "Enable foo mode"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
 			},
 		},
 		{
 			name:      "stops right after the synthesized -v/--version",
 			stopAfter: 3,
 			want: []Option{
-				{Flag: "-f", Help: "Enable foo mode"},
-				{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
-				{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
+				&StringOption{Flag: "-f", Help: "Enable foo mode"},
+				&BoolOption{Flag: "-h", Long: "--help", Help: "Print help", Dest: anyDest, Action: anyAction},
+				&BoolOption{Flag: "-v", Long: "--version", Help: "Print version", Dest: anyDest, Action: anyAction},
 			},
 		},
 	}
@@ -625,13 +608,13 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []Option
-			cmd.allOptions()(func(opt Option) bool {
+			cmd.options()(func(opt Option) bool {
 				got = append(got, opt)
 				return len(got) < tt.stopAfter
 			})
 
 			if !optionSlicesEqual(got, tt.want) {
-				t.Errorf("allOptions() stopped after %d = %+v, want %+v", tt.stopAfter, got, tt.want)
+				t.Errorf("options() stopped after %d = %+v, want %+v", tt.stopAfter, got, tt.want)
 			}
 		})
 	}
@@ -641,20 +624,20 @@ func TestAllOptions_StopsEarly(t *testing.T) {
 			Name:    "myprogram",
 			Version: "0.1.0",
 			Options: []Option{
-				{Flag: "-h", Long: "--help", Help: "Custom help"},
+				&StringOption{Flag: "-h", Long: "--help", Help: "Custom help"},
 			},
 		}
 
 		var got []Option
-		cmd.allOptions()(func(opt Option) bool {
+		cmd.options()(func(opt Option) bool {
 			got = append(got, opt)
 			return true
 		})
 
 		if len(got) != 2 {
-			t.Fatalf("allOptions() = %d options, want 2 (user -h/--help + version built-in)", len(got))
+			t.Fatalf("options() = %d options, want 2 (user -h/--help + version built-in)", len(got))
 		}
-		if got[1].Flag != "-v" || got[1].Long != "--version" {
+		if got[1].flag() != "-v" || got[1].long() != "--version" {
 			t.Errorf("second yielded Option = %+v, want the version built-in", got[1])
 		}
 	})
@@ -677,8 +660,8 @@ func TestAllEnvVars(t *testing.T) {
 			name: "no Env declared anywhere",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux"}},
-				Options:   []Option{{Flag: "-f"}},
+				Arguments: []Argument{&StringArgument{Name: "qux"}},
+				Options:   []Option{&StringOption{Flag: "-f"}},
 			},
 			want: nil,
 		},
@@ -686,7 +669,7 @@ func TestAllEnvVars(t *testing.T) {
 			name: "only an Argument declares Env",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
 			},
 			want: []EnvVar{
 				{Name: "PROGRAM_QUX", Help: "The qux to operate on"},
@@ -696,7 +679,7 @@ func TestAllEnvVars(t *testing.T) {
 			name: "only an Option declares Env",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
+				Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
 			},
 			want: []EnvVar{
 				{Name: "PROGRAM_BAR", Help: "Set the bar value"},
@@ -707,8 +690,8 @@ func TestAllEnvVars(t *testing.T) {
 			name: "env vars from both, Arguments first",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 			},
 			want: []EnvVar{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
@@ -720,12 +703,12 @@ func TestAllEnvVars(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Arguments: []Argument{
-					{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
-					{Name: "quux", Help: "No env for this one"},
+					&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
+					&StringArgument{Name: "quux", Help: "No env for this one"},
 				},
 				Options: []Option{
-					{Flag: "-f", Help: "No env for this one either"},
-					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
+					&StringOption{Flag: "-f", Help: "No env for this one either"},
+					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
 				},
 			},
 			want: []EnvVar{
@@ -749,8 +732,8 @@ func TestAllEnvVars(t *testing.T) {
 			name: "Arguments, Options, and standalone EnvVars all present, in that order",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
 			want: []EnvVar{
@@ -768,10 +751,10 @@ func TestAllEnvVars(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Arguments: []Argument{
-					{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX", Dest: destQux, Default: "fallback-qux"},
+					&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX", Dest: destQux, Default: "fallback-qux"},
 				},
 				Options: []Option{
-					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR", Dest: destBar, Default: "fallback-bar"},
+					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR", Dest: destBar, Default: "fallback-bar"},
 				},
 			},
 			want: []EnvVar{
@@ -794,13 +777,13 @@ func TestAllEnvVars(t *testing.T) {
 // TestAllEnvVars_StopsEarly covers all three early-exit points in
 // allEnvVars -- the "if !yield(...) { return }" inside the Arguments
 // loop, the one inside the Options loop, and the one inside the
-// standalone EnvVars loop -- the same reason TestAllOptions_StopsEarly
+// standalone EnvVars loop -- the same reason TestOptions_StopsEarly
 // needed more than a single stopping point.
 func TestAllEnvVars_StopsEarly(t *testing.T) {
 	cmd := Command{
 		Name:      "myprogram",
-		Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-		Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+		Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+		Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 		EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 	}
 
@@ -842,7 +825,7 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 }
 
 // TestAllDefaults exercises allDefaults directly. Unlike
-// allOptions/allEnvVars, it yields unconditionally -- every
+// options/allEnvVars, it yields unconditionally -- every
 // Argument/Option/EnvVar produces a (Dest, Default) pair even when
 // both are nil -- so the cases here cover that alongside the
 // Arguments-then-Options-then-EnvVars order.
@@ -869,8 +852,8 @@ func TestAllDefaults(t *testing.T) {
 	t.Run("items with no Default are still yielded, as a nil pair", func(t *testing.T) {
 		c := Command{
 			Name:      "myprogram",
-			Arguments: []Argument{{Name: "qux"}},
-			Options:   []Option{{Flag: "-f"}},
+			Arguments: []Argument{&StringArgument{Name: "qux"}},
+			Options:   []Option{&StringOption{Flag: "-f"}},
 		}
 		want := []pair{{nil, nil}, {nil, nil}}
 		if got := collect(c); !slices.Equal(got, want) {
@@ -883,7 +866,7 @@ func TestAllDefaults(t *testing.T) {
 		// allDefaults() must not filter on it.
 		var i int
 		dest := IntVar(&i)
-		c := Command{Name: "myprogram", Options: []Option{{Flag: "-n", Dest: dest, Default: 7}}}
+		c := Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-n", Dest: dest, Default: 7}}}
 		want := []pair{{dest, 7}}
 		if got := collect(c); !slices.Equal(got, want) {
 			t.Errorf("allDefaults() = %+v, want %+v", got, want)
@@ -895,8 +878,8 @@ func TestAllDefaults(t *testing.T) {
 		destQux, destBar, destDebug := StringVar(&qux), StringVar(&bar), StringVar(&debug)
 		c := Command{
 			Name:      "myprogram",
-			Arguments: []Argument{{Name: "qux", Dest: destQux, Default: "fallback-qux"}},
-			Options:   []Option{{Flag: "-b", Dest: destBar, Default: "fallback-bar"}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: destQux, Default: "fallback-qux"}},
+			Options:   []Option{&StringOption{Flag: "-b", Dest: destBar, Default: "fallback-bar"}},
 			EnvVars:   []EnvVar{{Name: "APP_DEBUG", Dest: destDebug, Default: "fallback-debug"}},
 		}
 		want := []pair{
@@ -917,8 +900,8 @@ func TestAllDefaults_StopsEarly(t *testing.T) {
 	var a, b, e string
 	cmd := Command{
 		Name:      "myprogram",
-		Arguments: []Argument{{Name: "qux", Dest: StringVar(&a), Default: "a"}},
-		Options:   []Option{{Flag: "-b", Dest: StringVar(&b), Default: "b"}},
+		Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&a), Default: "a"}},
+		Options:   []Option{&StringOption{Flag: "-b", Dest: StringVar(&b), Default: "b"}},
 		EnvVars:   []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&e), Default: "e"}},
 	}
 
@@ -973,7 +956,7 @@ func TestValidate(t *testing.T) {
 			name: "propagates a validateArguments failure",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: ""}},
+				Arguments: []Argument{&StringArgument{Name: ""}},
 			},
 			wantErr: true,
 		},
@@ -981,7 +964,7 @@ func TestValidate(t *testing.T) {
 			name: "propagates a validateOptions failure",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{}},
+				Options: []Option{&StringOption{}},
 			},
 			wantErr: true,
 		},
@@ -997,7 +980,7 @@ func TestValidate(t *testing.T) {
 			name: "partial claim on the help built-in's forms: collision rejected",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Flag: "-h", Help: "Custom help"}},
+				Options: []Option{&StringOption{Flag: "-h", Help: "Custom help"}},
 			},
 			wantErr: true,
 		},
@@ -1006,7 +989,7 @@ func TestValidate(t *testing.T) {
 			cmd: Command{
 				Name:    "myprogram",
 				Version: "0.1.0",
-				Options: []Option{{Long: "--version", Help: "Custom version"}},
+				Options: []Option{&StringOption{Long: "--version", Help: "Custom version"}},
 			},
 			wantErr: true,
 		},
@@ -1015,7 +998,7 @@ func TestValidate(t *testing.T) {
 			cmd: Command{
 				Name:    "myprogram",
 				Version: "0.1.0",
-				Options: []Option{{Flag: "-v", Long: "--verbose", Help: "Verbose"}},
+				Options: []Option{&StringOption{Flag: "-v", Long: "--verbose", Help: "Verbose"}},
 			},
 		},
 		{
@@ -1024,8 +1007,8 @@ func TestValidate(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-v", Long: "--verbose", Help: "Verbose"},
-					{Flag: "-V", Long: "--vv", Help: "Very verbose"},
+					&StringOption{Flag: "-v", Long: "--verbose", Help: "Verbose"},
+					&StringOption{Flag: "-V", Long: "--vv", Help: "Very verbose"},
 				},
 			},
 		},
@@ -1033,7 +1016,7 @@ func TestValidate(t *testing.T) {
 			name: "full claim on the help built-in's forms: built-in suppressed, no conflict",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Flag: "-h", Long: "--help", Help: "Custom help"}},
+				Options: []Option{&StringOption{Flag: "-h", Long: "--help", Help: "Custom help"}},
 			},
 		},
 		{
@@ -1041,7 +1024,7 @@ func TestValidate(t *testing.T) {
 			cmd: Command{
 				Name:    "myprogram",
 				Version: "0.1.0",
-				Options: []Option{{Flag: "-v", Long: "--version", Help: "Custom version"}},
+				Options: []Option{&StringOption{Flag: "-v", Long: "--version", Help: "Custom version"}},
 			},
 		},
 	}
@@ -1077,31 +1060,31 @@ func TestValidateArguments(t *testing.T) {
 		},
 		{
 			name: "valid, one argument",
-			args: []Argument{{Name: "qux", Dest: StringVar(&s)}},
+			args: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&s)}},
 		},
 		{
 			name:    "empty Argument.Name",
-			args:    []Argument{{Name: ""}},
+			args:    []Argument{&StringArgument{Name: ""}},
 			wantErr: true,
 		},
 		{
 			name: "duplicate Argument.Name",
 			args: []Argument{
-				{Name: "qux"},
-				{Name: "qux"},
+				&StringArgument{Name: "qux"},
+				&StringArgument{Name: "qux"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "Default matches Dest type",
 			args: []Argument{
-				{Name: "qux", Dest: StringVar(&s), Default: "bar"},
+				&StringArgument{Name: "qux", Dest: StringVar(&s), Default: "bar"},
 			},
 		},
 		{
 			name: "Default mismatches Dest type",
 			args: []Argument{
-				{Name: "qux", Dest: StringVar(&s), Default: 42},
+				&StringArgument{Name: "qux", Dest: StringVar(&s), Default: 42},
 			},
 			wantErr: true,
 		},
@@ -1133,73 +1116,73 @@ func TestValidateOptions(t *testing.T) {
 		},
 		{
 			name: "valid, option with Flag only",
-			opts: []Option{{Flag: "f"}},
+			opts: []Option{&StringOption{Flag: "f"}},
 		},
 		{
 			name: "valid, option with Long only",
-			opts: []Option{{Long: "foo"}},
+			opts: []Option{&StringOption{Long: "foo"}},
 		},
 		{
 			name: "valid, option with Flag and Long",
-			opts: []Option{{Flag: "f", Long: "foo"}},
+			opts: []Option{&StringOption{Flag: "f", Long: "foo"}},
 		},
 		{
 			name: "valid, option with Action instead of Dest",
-			opts: []Option{{Flag: "f", Action: func(*Command, Option, string) *Error { return nil }}},
+			opts: []Option{&StringOption{Flag: "f", Action: func(*Command, Option, string) *Error { return nil }}},
 		},
 		{
 			name: "valid, option with both Dest and Action",
-			opts: []Option{{Flag: "f", Dest: StringVar(&s), Action: func(*Command, Option, string) *Error { return nil }}},
+			opts: []Option{&StringOption{Flag: "f", Dest: StringVar(&s), Action: func(*Command, Option, string) *Error { return nil }}},
 		},
 		{
 			name:    "option missing both Flag and Long",
-			opts:    []Option{{}},
+			opts:    []Option{&StringOption{}},
 			wantErr: true,
 		},
 		{
 			name:    "option Flag longer than one character",
-			opts:    []Option{{Flag: "-ab"}},
+			opts:    []Option{&StringOption{Flag: "-ab"}},
 			wantErr: true,
 		},
 		{
 			name:    "option Flag with only dashes",
-			opts:    []Option{{Flag: "--"}},
+			opts:    []Option{&StringOption{Flag: "--"}},
 			wantErr: true,
 		},
 		{
 			name: "duplicate option flag, same spelling",
 			opts: []Option{
-				{Flag: "f"},
-				{Flag: "f"},
+				&StringOption{Flag: "f"},
+				&StringOption{Flag: "f"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "duplicate option flag, different spelling normalizes the same",
 			opts: []Option{
-				{Flag: "f"},
-				{Flag: "-f"},
+				&StringOption{Flag: "f"},
+				&StringOption{Flag: "-f"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "duplicate option long, different spelling normalizes the same",
 			opts: []Option{
-				{Long: "bar"},
-				{Long: "--bar"},
+				&StringOption{Long: "bar"},
+				&StringOption{Long: "--bar"},
 			},
 			wantErr: true,
 		},
 		{
 			name: "Default matches Dest type",
 			opts: []Option{
-				{Flag: "f", Dest: StringVar(&s), Default: "bar"},
+				&StringOption{Flag: "f", Dest: StringVar(&s), Default: "bar"},
 			},
 		},
 		{
 			name: "Default mismatches Dest type",
 			opts: []Option{
-				{Flag: "f", Dest: StringVar(&s), Default: 42},
+				&StringOption{Flag: "f", Dest: StringVar(&s), Default: 42},
 			},
 			wantErr: true,
 		},
@@ -1230,15 +1213,15 @@ func TestValidateEnvVars(t *testing.T) {
 		{
 			name: "no env vars anywhere",
 			cmd: Command{
-				Arguments: []Argument{{Name: "qux"}},
-				Options:   []Option{{Flag: "-f"}},
+				Arguments: []Argument{&StringArgument{Name: "qux"}},
+				Options:   []Option{&StringOption{Flag: "-f"}},
 			},
 		},
 		{
 			name: "valid, one env var per source",
 			cmd: Command{
-				Arguments: []Argument{{Name: "qux", Env: "APP_QUX"}},
-				Options:   []Option{{Flag: "-b", Env: "APP_BAR"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Env: "APP_BAR"}},
 				EnvVars:   []EnvVar{{Name: "APP_DEBUG"}},
 			},
 		},
@@ -1261,8 +1244,8 @@ func TestValidateEnvVars(t *testing.T) {
 			name: "duplicate name, both from Arguments",
 			cmd: Command{
 				Arguments: []Argument{
-					{Name: "qux", Env: "APP_QUX"},
-					{Name: "quux", Env: "APP_QUX"},
+					&StringArgument{Name: "qux", Env: "APP_QUX"},
+					&StringArgument{Name: "quux", Env: "APP_QUX"},
 				},
 			},
 			wantErr: true,
@@ -1270,15 +1253,15 @@ func TestValidateEnvVars(t *testing.T) {
 		{
 			name: "duplicate name, Argument.Env vs Option.Env",
 			cmd: Command{
-				Arguments: []Argument{{Name: "qux", Env: "APP_QUX"}},
-				Options:   []Option{{Flag: "-b", Env: "APP_QUX"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Env: "APP_QUX"}},
 			},
 			wantErr: true,
 		},
 		{
 			name: "duplicate name, Argument.Env vs EnvVars",
 			cmd: Command{
-				Arguments: []Argument{{Name: "qux", Env: "APP_QUX"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
 				EnvVars:   []EnvVar{{Name: "APP_QUX"}},
 			},
 			wantErr: true,
@@ -1286,7 +1269,7 @@ func TestValidateEnvVars(t *testing.T) {
 		{
 			name: "duplicate name, Option.Env vs EnvVars",
 			cmd: Command{
-				Options: []Option{{Flag: "-b", Env: "APP_BAR"}},
+				Options: []Option{&StringOption{Flag: "-b", Env: "APP_BAR"}},
 				EnvVars: []EnvVar{{Name: "APP_BAR"}},
 			},
 			wantErr: true,
@@ -1380,7 +1363,7 @@ func TestParse(t *testing.T) {
 		var s string
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{{Flag: "-b", Dest: StringVar(&s)}},
+			Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&s)}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1395,7 +1378,7 @@ func TestParse(t *testing.T) {
 		var s string
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{{Flag: "-b", Env: "APP_BAR", Dest: StringVar(&s), Default: "fallback"}},
+			Options: []Option{&StringOption{Flag: "-b", Env: "APP_BAR", Dest: StringVar(&s), Default: "fallback"}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1411,7 +1394,7 @@ func TestParse(t *testing.T) {
 		t.Setenv("APP_QUX", "from-env")
 		c := &Command{
 			Name:      "myprogram",
-			Arguments: []Argument{{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s), Default: "fallback"}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s), Default: "fallback"}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1427,7 +1410,7 @@ func TestParse(t *testing.T) {
 		t.Setenv("APP_NUM", "42")
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i), Default: 7}},
+			Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i), Default: 7}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1461,7 +1444,7 @@ func TestParse(t *testing.T) {
 		var buf bytes.Buffer
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{{Flag: "-x", Dest: failingValue{}, Default: "anything"}},
+			Options: []Option{&StringOption{Flag: "-x", Dest: failingValue{}, Default: "anything"}},
 			Stderr:  &buf,
 		}
 
@@ -1483,7 +1466,7 @@ func TestParse(t *testing.T) {
 		t.Setenv("APP_NUM", "not-a-number")
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
+			Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
 			Stderr:  &buf,
 		}
 
@@ -1542,7 +1525,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		var buf bytes.Buffer
 		c := &Command{
 			Name: "myprogram",
-			Options: []Option{{
+			Options: []Option{&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Custom help",
 				// A boolean Dest keeps the Option from consuming a value.
 				Dest: BoolVar(&custom),
@@ -1585,7 +1568,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name:    "myprogram",
 			Version: "0.1.0",
 			Stdout:  &buf,
-			Options: []Option{{Flag: "-v", Long: "--verbose", Help: "Verbose", Dest: BoolVar(&verbose)}},
+			Options: []Option{&BoolOption{Flag: "-v", Long: "--verbose", Help: "Verbose", Dest: BoolVar(&verbose)}},
 		}
 
 		if err := c.Parse([]string{"-v"}); err != nil {
@@ -1615,8 +1598,8 @@ func TestParse_TokenLoop(t *testing.T) {
 			Version: "0.1.0",
 			Stdout:  &buf,
 			Options: []Option{
-				{Flag: "-v", Long: "--verbose", Dest: BoolVar(&v1)},
-				{Flag: "-V", Long: "--vv", Dest: BoolVar(&v2)},
+				&BoolOption{Flag: "-v", Long: "--verbose", Dest: BoolVar(&v1)},
+				&BoolOption{Flag: "-V", Long: "--vv", Dest: BoolVar(&v2)},
 			},
 		}
 
@@ -1662,8 +1645,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{{Flag: "-f", Dest: BoolVar(&foo)}},
-			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&BoolOption{Flag: "-f", Dest: BoolVar(&foo)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
 		}
 
 		if err := c.Parse([]string{"-f", "hello"}); err != nil {
@@ -1679,7 +1662,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("value-taking option consumes the next token", func(t *testing.T) {
 		var bar string
-		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}}}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}}}
 
 		if err := c.Parse([]string{"--bar", "value"}); err != nil {
 			t.Fatalf("Parse() = %v, want nil", err)
@@ -1692,7 +1675,7 @@ func TestParse_TokenLoop(t *testing.T) {
 	t.Run("value-taking option missing its value", func(t *testing.T) {
 		var bar string
 		var buf bytes.Buffer
-		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b", Dest: StringVar(&bar)}}, Stderr: &buf}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&bar)}}, Stderr: &buf}
 
 		err := c.Parse([]string{"-b"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1705,7 +1688,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("value-taking option, invalid value", func(t *testing.T) {
 		var n int
-		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-n", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-n", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
 
 		err := c.Parse([]string{"-n", "not-a-number"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1720,8 +1703,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var bar, qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}},
-			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
 		}
 
 		if err := c.Parse([]string{"--bar=value", "hello"}); err != nil {
@@ -1739,8 +1722,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var bar, qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{{Long: "--bar", Dest: StringVar(&bar)}},
-			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&StringOption{Long: "--bar", Dest: StringVar(&bar)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
 		}
 
 		if err := c.Parse([]string{"--bar=", "hello"}); err != nil {
@@ -1756,7 +1739,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("--bar=a=b splits only on the first =", func(t *testing.T) {
 		var bar string
-		c := &Command{Name: "myprogram", Options: []Option{{Long: "--bar", Dest: StringVar(&bar)}}}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Long: "--bar", Dest: StringVar(&bar)}}}
 
 		if err := c.Parse([]string{"--bar=a=b"}); err != nil {
 			t.Fatalf("Parse() = %v, want nil", err)
@@ -1768,7 +1751,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("--flag=false overrides a boolean Dest's bare-presence true", func(t *testing.T) {
 		var verbose bool
-		c := &Command{Name: "myprogram", Options: []Option{{Long: "--verbose", Dest: BoolVar(&verbose)}}}
+		c := &Command{Name: "myprogram", Options: []Option{&BoolOption{Long: "--verbose", Dest: BoolVar(&verbose)}}}
 
 		if err := c.Parse([]string{"--verbose=false"}); err != nil {
 			t.Fatalf("Parse() = %v, want nil", err)
@@ -1781,7 +1764,7 @@ func TestParse_TokenLoop(t *testing.T) {
 	t.Run(`-b=value is not split -- "=" merging is long-form only`, func(t *testing.T) {
 		var b string
 		var buf bytes.Buffer
-		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b", Dest: StringVar(&b)}}, Stderr: &buf}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&b)}}, Stderr: &buf}
 
 		err := c.Parse([]string{"-b=value"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1810,8 +1793,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Arguments: []Argument{
-				{Name: "first", Dest: StringVar(&a)},
-				{Name: "second", Dest: StringVar(&b)},
+				&StringArgument{Name: "first", Dest: StringVar(&a)},
+				&StringArgument{Name: "second", Dest: StringVar(&b)},
 			},
 		}
 
@@ -1837,7 +1820,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("positional argument, invalid value", func(t *testing.T) {
 		var n int
-		c := &Command{Name: "myprogram", Arguments: []Argument{{Name: "num", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
+		c := &Command{Name: "myprogram", Arguments: []Argument{&StringArgument{Name: "num", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
 
 		err := c.Parse([]string{"not-a-number"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1849,7 +1832,7 @@ func TestParse_TokenLoop(t *testing.T) {
 	})
 
 	t.Run("Argument with no Dest is still consumed positionally, just not bound", func(t *testing.T) {
-		c := &Command{Name: "myprogram", Arguments: []Argument{{Name: "qux"}}}
+		c := &Command{Name: "myprogram", Arguments: []Argument{&StringArgument{Name: "qux"}}}
 
 		if err := c.Parse([]string{"anything"}); err != nil {
 			t.Errorf("Parse() = %v, want nil", err)
@@ -1861,8 +1844,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{{Flag: "-f", Dest: BoolVar(&foo)}},
-			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&BoolOption{Flag: "-f", Dest: BoolVar(&foo)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
 		}
 
 		if err := c.Parse([]string{"-f", "hello"}); err != nil {
@@ -1880,7 +1863,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{
-				{
+				&StringOption{
 					Flag: "-x", Long: "--extra",
 					Action: func(c *Command, opt Option, value string) *Error {
 						ran = true
@@ -1898,7 +1881,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		if !ran {
 			t.Fatal("Action did not run")
 		}
-		if seen.Flag != "-x" || seen.Long != "--extra" {
+		if seen.flag() != "-x" || seen.long() != "--extra" {
 			t.Errorf("Action received Option %+v, want Flag=-x Long=--extra", seen)
 		}
 		if seenValue != "something" {
@@ -1913,9 +1896,9 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{
-				{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { ran = true; seenValue = value; return nil }},
+				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { ran = true; seenValue = value; return nil }},
 			},
-			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
 		}
 
 		if err := c.Parse([]string{"-x", "consumed", "hello"}); err != nil {
@@ -1938,8 +1921,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{
-				{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { return newError(2, "%s", sentinel) }},
-				{Flag: "-y", Dest: BoolVar(&later)},
+				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { return newError(2, "%s", sentinel) }},
+				&BoolOption{Flag: "-y", Dest: BoolVar(&later)},
 			},
 		}
 
@@ -1960,7 +1943,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		var seenViaAction string
 		c := &Command{
 			Name: "myprogram",
-			Options: []Option{{
+			Options: []Option{&StringOption{
 				Flag: "-b", Dest: StringVar(&bar),
 				Action: func(c *Command, opt Option, value string) *Error {
 					seenViaAction = value
@@ -1985,7 +1968,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		var seenViaAction string
 		c := &Command{
 			Name: "myprogram",
-			Options: []Option{{
+			Options: []Option{&BoolOption{
 				Flag: "-f", Dest: BoolVar(&foo),
 				Action: func(c *Command, opt Option, value string) *Error {
 					seenViaAction = value
@@ -2009,7 +1992,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		var seenValue string
 		c := &Command{
 			Name: "myprogram",
-			Options: []Option{{
+			Options: []Option{&StringOption{
 				Flag: "-x",
 				Action: func(c *Command, opt Option, value string) *Error {
 					seenValue = value
@@ -2032,7 +2015,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		var triggered bool
 		c := &Command{
 			Name: "myprogram",
-			Options: []Option{{
+			Options: []Option{&BoolOption{
 				Flag: "-x",
 				Dest: BoolVar(&triggered),
 				Action: func(c *Command, opt Option, value string) *Error {
@@ -2040,7 +2023,7 @@ func TestParse_TokenLoop(t *testing.T) {
 					return nil
 				},
 			}},
-			Arguments: []Argument{{Name: "qux", Dest: StringVar(&qux)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
 		}
 
 		if err := c.Parse([]string{"-x", "hello"}); err != nil {
@@ -2062,7 +2045,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		var ran bool
 		c := &Command{
 			Name: "myprogram",
-			Options: []Option{{
+			Options: []Option{&StringOption{
 				Flag: "-n", Dest: IntVar(&n),
 				Action: func(c *Command, opt Option, value string) *Error { ran = true; return nil },
 			}},
@@ -2089,8 +2072,8 @@ func TestApplyDefaults(t *testing.T) {
 		var i int
 		c := &Command{
 			Name:      "myprogram",
-			Arguments: []Argument{{Name: "qux", Dest: StringVar(&s), Default: "fallback"}},
-			Options:   []Option{{Flag: "-n", Dest: IntVar(&i), Default: 7}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&s), Default: "fallback"}},
+			Options:   []Option{&StringOption{Flag: "-n", Dest: IntVar(&i), Default: 7}},
 		}
 
 		if err := c.applyDefaults(); err != nil {
@@ -2105,7 +2088,7 @@ func TestApplyDefaults(t *testing.T) {
 	})
 
 	t.Run("nil Dest/Default pairs are skipped", func(t *testing.T) {
-		c := &Command{Name: "myprogram", Options: []Option{{Flag: "-b"}}}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b"}}}
 
 		if err := c.applyDefaults(); err != nil {
 			t.Errorf("applyDefaults() = %v, want nil", err)
@@ -2117,7 +2100,7 @@ func TestApplyDefaults(t *testing.T) {
 		var i int
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{{Flag: "-n", Dest: IntVar(&i), Default: "not-a-number"}},
+			Options: []Option{&StringOption{Flag: "-n", Dest: IntVar(&i), Default: "not-a-number"}},
 			Stderr:  &buf,
 		}
 
@@ -2140,7 +2123,7 @@ func TestApplyDefaults(t *testing.T) {
 func TestApplyEnvVars(t *testing.T) {
 	t.Run("no Env declared: Dest untouched", func(t *testing.T) {
 		var s string
-		c := &Command{Options: []Option{{Flag: "-b", Dest: StringVar(&s)}}}
+		c := &Command{Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&s)}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2152,7 +2135,7 @@ func TestApplyEnvVars(t *testing.T) {
 
 	t.Run("Env declared but no Dest bound: informational only, no panic even if present", func(t *testing.T) {
 		t.Setenv("APP_BAR", "some-value")
-		c := &Command{Options: []Option{{Flag: "-b", Env: "APP_BAR"}}}
+		c := &Command{Options: []Option{&StringOption{Flag: "-b", Env: "APP_BAR"}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2176,7 +2159,7 @@ func TestApplyEnvVars(t *testing.T) {
 
 	t.Run("Env declared but absent from the environment: Dest untouched", func(t *testing.T) {
 		var s string
-		c := &Command{Options: []Option{{Flag: "-b", Env: "APP_DOES_NOT_EXIST", Dest: StringVar(&s)}}}
+		c := &Command{Options: []Option{&StringOption{Flag: "-b", Env: "APP_DOES_NOT_EXIST", Dest: StringVar(&s)}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2189,7 +2172,7 @@ func TestApplyEnvVars(t *testing.T) {
 	t.Run("env present overrides Dest, for an Argument", func(t *testing.T) {
 		var s string
 		t.Setenv("APP_QUX", "from-env")
-		c := &Command{Arguments: []Argument{{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s)}}}
+		c := &Command{Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s)}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2202,7 +2185,7 @@ func TestApplyEnvVars(t *testing.T) {
 	t.Run("env present overrides Dest, for an Option", func(t *testing.T) {
 		var i int
 		t.Setenv("APP_NUM", "42")
-		c := &Command{Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}}}
+		c := &Command{Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2231,7 +2214,7 @@ func TestApplyEnvVars(t *testing.T) {
 		t.Setenv("APP_NUM", "not-a-number")
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
+			Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
 			Stderr:  &buf,
 		}
 
@@ -2319,7 +2302,7 @@ func TestErrorString(t *testing.T) {
 			name: "usage line reflects declared Arguments",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux"}},
+				Arguments: []Argument{&StringArgument{Name: "qux"}},
 			},
 			err: errors.New(`unexpected argument "extra"`),
 			want: []string{
@@ -2383,7 +2366,7 @@ func TestUsageString(t *testing.T) {
 			name: "one argument",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux"}},
+				Arguments: []Argument{&StringArgument{Name: "qux"}},
 			},
 			want: "Usage: myprogram [options] [qux]\n",
 		},
@@ -2392,8 +2375,8 @@ func TestUsageString(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Arguments: []Argument{
-					{Name: "qux"},
-					{Name: "quux"},
+					&StringArgument{Name: "qux"},
+					&StringArgument{Name: "quux"},
 				},
 			},
 			want: "Usage: myprogram [options] [qux] [quux]\n",
@@ -2405,7 +2388,7 @@ func TestUsageString(t *testing.T) {
 			name: "options declared, still just \"[options]\"",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Flag: "f"}, {Long: "bar"}},
+				Options: []Option{&StringOption{Flag: "f"}, &StringOption{Long: "bar"}},
 			},
 			want: "Usage: myprogram [options]\n",
 		},
@@ -2424,7 +2407,7 @@ func TestPrintUsage(t *testing.T) {
 	var buf bytes.Buffer
 	c := &Command{
 		Name:      "myprogram",
-		Arguments: []Argument{{Name: "qux"}},
+		Arguments: []Argument{&StringArgument{Name: "qux"}},
 		Stdout:    &buf,
 	}
 
@@ -2486,7 +2469,7 @@ func TestHelpString(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-f", Long: "--file", Help: "Specify file name"},
+					&StringOption{Flag: "-f", Long: "--file", Help: "Specify file name"},
 				},
 			},
 			want: []string{
@@ -2504,9 +2487,9 @@ func TestHelpString(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-f", Help: "Enable foo mode"},
-					{Flag: "-b", Long: "--bar", Help: "Enable bar mode"},
-					{Long: "--grault", Help: "Enable grault mode"},
+					&StringOption{Flag: "-f", Help: "Enable foo mode"},
+					&StringOption{Flag: "-b", Long: "--bar", Help: "Enable bar mode"},
+					&StringOption{Long: "--grault", Help: "Enable grault mode"},
 				},
 			},
 			want: []string{
@@ -2524,7 +2507,7 @@ func TestHelpString(t *testing.T) {
 			name: "single argument, no options",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on"}},
 			},
 			want: []string{
 				"Usage: myprogram [options] [qux]",
@@ -2543,8 +2526,8 @@ func TestHelpString(t *testing.T) {
 			name: "argument and option aligned to one shared column",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on"}},
-				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on"}},
+				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value"}},
 			},
 			want: []string{
 				"Usage: myprogram [options] [qux]",
@@ -2562,8 +2545,8 @@ func TestHelpString(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Arguments: []Argument{
-					{Name: "qux", Help: "The qux to operate on"},
-					{Name: "quuxlong", Help: "The quuxlong to operate on"},
+					&StringArgument{Name: "qux", Help: "The qux to operate on"},
+					&StringArgument{Name: "quuxlong", Help: "The quuxlong to operate on"},
 				},
 			},
 			want: []string{
@@ -2582,8 +2565,8 @@ func TestHelpString(t *testing.T) {
 			cmd: Command{
 				Name:      "myprogram",
 				Version:   "0.1.0",
-				Arguments: []Argument{{Name: "argumentwithalongname", Help: "Wide one"}},
-				Options:   []Option{{Flag: "-f", Help: "Enable foo mode"}},
+				Arguments: []Argument{&StringArgument{Name: "argumentwithalongname", Help: "Wide one"}},
+				Options:   []Option{&StringOption{Flag: "-f", Help: "Enable foo mode"}},
 			},
 			want: []string{
 				"Usage: myprogram [options] [argumentwithalongname]",
@@ -2601,7 +2584,7 @@ func TestHelpString(t *testing.T) {
 			name: "env var from an Option",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
+				Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
 			},
 			want: []string{
 				"Usage: myprogram [options]",
@@ -2618,7 +2601,7 @@ func TestHelpString(t *testing.T) {
 			name: "env var from an Argument",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
 			},
 			want: []string{
 				"Usage: myprogram [options] [qux]",
@@ -2639,8 +2622,8 @@ func TestHelpString(t *testing.T) {
 			name: "env vars from both an Argument and an Option, Arguments first",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 			},
 			want: []string{
 				"Usage: myprogram [options] [qux]",
@@ -2662,7 +2645,7 @@ func TestHelpString(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Options: []Option{
-					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_REALLY_LONG_BAR_NAME"},
+					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_REALLY_LONG_BAR_NAME"},
 				},
 			},
 			want: []string{
@@ -2681,12 +2664,12 @@ func TestHelpString(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Arguments: []Argument{
-					{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
-					{Name: "quux", Help: "No env for this one"},
+					&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
+					&StringArgument{Name: "quux", Help: "No env for this one"},
 				},
 				Options: []Option{
-					{Flag: "-f", Help: "No env for this one either"},
-					{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
+					&StringOption{Flag: "-f", Help: "No env for this one either"},
+					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
 				},
 			},
 			want: []string{
@@ -2713,8 +2696,8 @@ func TestHelpString(t *testing.T) {
 			name: "standalone EnvVars listed after Argument/Option env vars",
 			cmd: Command{
 				Name:      "myprogram",
-				Arguments: []Argument{{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-				Options:   []Option{{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
+				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
 			want: []string{
@@ -2740,7 +2723,7 @@ func TestHelpString(t *testing.T) {
 				Name:    "myprogram",
 				Version: "0.1.0",
 				Options: []Option{
-					{Flag: "-v", Long: "--verbose", Help: "Verbose output"},
+					&StringOption{Flag: "-v", Long: "--verbose", Help: "Verbose output"},
 				},
 			},
 			want: []string{
@@ -2763,7 +2746,7 @@ func TestHelpString(t *testing.T) {
 			cmd: Command{
 				Name: "myprogram",
 				Options: []Option{
-					{Flag: "-h", Long: "--help", Help: "Show this message"},
+					&StringOption{Flag: "-h", Long: "--help", Help: "Show this message"},
 				},
 			},
 			want: []string{

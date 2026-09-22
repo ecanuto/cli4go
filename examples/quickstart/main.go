@@ -26,20 +26,20 @@ func main() {
 		Version:     "0.1.0",
 		Description: "My foo bar program",
 		Arguments: []cli.Argument{
-			{
+			&cli.StringArgument{
 				// A positional argument: no Flag/Long, just a Name and a Dest.
 				Name: "qux", Help: "The qux to operate on",
 				Dest: cli.StringVar(&cfg.Qux),
 			},
 		},
 		Options: []cli.Option{
-			{
+			&cli.BoolOption{
 				// A boolean flag: presence sets it true, absence leaves the
 				// zero value (false).
 				Flag: "-f", Long: "--foo", Help: "Enable foo mode",
 				Dest: cli.BoolVar(&cfg.Foo),
 			},
-			{
+			&cli.StringOption{
 				// Precedence chain for a value that can come from several
 				// places: an explicit -b/--bar flag wins over the
 				// PROGRAM_BAR environment variable, which wins over Default.

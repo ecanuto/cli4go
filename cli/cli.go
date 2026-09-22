@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"os"
+
 	"slices"
 	"strconv"
 	"strings"
@@ -90,21 +91,6 @@ func (b *boolValue) Set(val string) error {
 	return nil
 }
 
-// IsBoolFlag reports that boolValue never consumes a following token --
-// its mere presence on the command line is enough to set it to true.
-// This satisfies the unexported interface Parse checks for via
-// isBoolFlag, mirroring the standard library flag package's own
-// internal convention.
-func (b *boolValue) IsBoolFlag() bool { return true }
-
-// isBoolFlag reports whether v should be treated as a boolean flag: one
-// that never consumes a following token. This mirrors the internal
-// boolFlag interface used by the standard library's flag package.
-func isBoolFlag(v Value) bool {
-	bf, ok := v.(interface{ IsBoolFlag() bool })
-	return ok && bf.IsBoolFlag()
-}
-
 // --- Errors ------------------------------------------------------------------
 
 // Error is returned by Parse and DefaultParse. It behaves like a normal
@@ -180,7 +166,35 @@ var (
 // Argument describes a single positional argument. Its position in
 // Command.Arguments determines the order in which it is expected on the
 // command line.
-type Argument struct {
+//
+// Argument is implemented by a family of typed structs -- StringArgument
+// today, with more (IntArgument, BoolArgument, ...) planned -- instead of
+// by one struct carrying a Dest/Default pair whose concrete type has to
+// be inferred at runtime (the old design, still visible as comments in
+// cli.go on the exp/typed-fields branch). Each concrete type owns its
+// Default (and, eventually, its parsed value) as its own Go type, so
+// there is nothing to type-switch on.
+//
+// The interface itself is unexported-method-only, mirroring the
+// Option.flag()/Option.long() pattern already used elsewhere in this
+// package: a concrete type keeps its fields public (Name, Help, ...) for
+// struct-literal construction, and satisfies Argument through small
+// unexported accessor methods with different names, so field and method
+// never collide.
+type Argument interface {
+	name() string
+	help() string
+	env() string
+	dest() Value
+	defaultValue() any
+}
+
+// StringArgument describes a single string-typed positional argument --
+// the Argument implementation for the common case of an argument whose
+// value is just the token as typed, with no conversion. It carries the
+// exact same fields the old, unified Argument struct did; only the name
+// and its place in the type system have changed.
+type StringArgument struct {
 	// Name is the argument's display name, used in generated usage text
 	// (e.g. "qux" in "Usage: myprogram [qux]").
 	Name string
@@ -202,19 +216,181 @@ type Argument struct {
 	Env string
 }
 
+func (a *StringArgument) name() string      { return a.Name }
+func (a *StringArgument) help() string      { return a.Help }
+func (a *StringArgument) env() string       { return a.Env }
+func (a *StringArgument) dest() Value       { return a.Dest }
+func (a *StringArgument) defaultValue() any { return a.Default }
+
+// Option describes a single flag (e.g. "-f, --foo"). Unlike Argument, the
+// order of Options in Command.Options has no effect on parsing: flags can
+// appear in any order on the command line.
+//
+// Option is implemented by a family of typed structs -- StringOption and
+// BoolOption today, with more (IntOption, ...) planned -- instead of one
+// struct carrying a Dest/Default pair whose concrete type has to be
+// inferred at runtime. See StringOption and BoolOption, and Argument's
+// doc comment above for the same reasoning applied there.
+//
+// The interface itself is unexported-method-only: a concrete type keeps
+// its fields public (Name, Flag, Long, ...) for struct-literal
+// construction, and satisfies Option through small unexported accessor
+// methods with different names from the fields they read, so field and
+// method never collide -- the same pattern the old Option.flag()/
+// Option.long() already used before Option became an interface.
+type Option interface {
+	name() string
+	help() string
+	env() string
+	dest() Value
+	defaultValue() any
+	flag() string
+	long() string
+	action() Action
+}
+
+// normalizeDashes returns s with exactly dashes leading dashes, first
+// stripping whatever dashes s already has -- the shared rule behind
+// both a Flag ("f", "-f", "--f" -> "-f" with dashes=1) and a Long
+// ("bar", "-bar", "--bar", "---bar" -> "--bar" with dashes=2). A single
+// leading dash on what's meant to be a Long is treated the same as no
+// dash at all, so "-bar" (a likely typo) is normalized rather than
+// rejected. Idempotent on an already-normalized or empty s. Shared by
+// every Option implementation's flag()/long() methods, so the
+// normalization rule only lives in one place.
+func normalizeDashes(s string, dashes int) string {
+	if s == "" {
+		return s
+	}
+	return strings.Repeat("-", dashes) + strings.TrimLeft(s, "-")
+}
+
+// StringOption describes a single string-typed flag -- the Option
+// implementation for the common case of a flag whose value is just the
+// token as typed, with no conversion. It carries the exact same fields
+// the old, unified Option struct did; only the name and its place in
+// the type system have changed.
+type StringOption struct {
+	// Name is an optional, stable identifier for this Option, decoupled
+	// from Flag/Long. It exists for two purposes: as the preferred
+	// source for the generated help placeholder (e.g. "<BAR>", falling
+	// back to Long then Flag when Name is unset), and, in a future
+	// bind/AutoBind feature, as the key used to match this Option
+	// against a config struct field -- something Flag/Long ("-b",
+	// "--bar") are not well suited for, since they're user-facing
+	// display text rather than a stable identity.
+	Name string
+
+	// Flag is the short flag form, e.g. "f" or "-f" -- the leading dash
+	// is optional and added automatically if omitted. Optional field.
+	//
+	// Declaring both this and the matching Long form of a built-in
+	// (-h and --help, or -v and --version), whether on one Option or
+	// split across several, suppresses that built-in entry from the
+	// generated help and from Parse's dispatch; declaring only one of
+	// the two forms is a conflict, rejected by Validate. The one
+	// exception is -v: declaring it without --version makes the
+	// version built-in use -V instead. See options' doc comment.
+	Flag string
+
+	// Long is the long flag form, e.g. "bar" or "--bar" -- the leading "--"
+	// is optional and added automatically if omitted. Optional, though at
+	// least one of Flag/Long should be set.
+	//
+	// See Flag's doc comment for how declaring a built-in's forms
+	// affects that built-in. In particular, declaring "--version"
+	// while leaving "-v" free is a conflict, not a fallback: only a
+	// claimed "-v" makes the version built-in switch to "-V".
+	Long string
+
+	// Help explains what the option does. Shown in the generated
+	// "Options:" help section.
+	Help string
+
+	// Dest binds the parsed value to a variable. See StringVar, BoolVar,
+	// IntVar. May be combined with Action -- see the Action doc comment
+	// for the exact resolution order.
+	Dest Value
+
+	// Default is shown in the help text as "(default: ...)" and is
+	// assigned to Dest before Env and the command line are considered.
+	Default any
+
+	// Env, if set, is the environment variable consulted when this
+	// option is not provided on the command line.
+	Env string
+
+	// Action, if set, runs when this Option's flag is seen on the
+	// command line -- see the Action doc comment for its exact contract
+	// and how it combines with Dest.
+	Action Action
+}
+
+func (o *StringOption) name() string      { return o.Name }
+func (o *StringOption) help() string      { return o.Help }
+func (o *StringOption) env() string       { return o.Env }
+func (o *StringOption) dest() Value       { return o.Dest }
+func (o *StringOption) defaultValue() any { return o.Default }
+func (o *StringOption) flag() string      { return normalizeDashes(o.Flag, 1) }
+func (o *StringOption) long() string      { return normalizeDashes(o.Long, 2) }
+func (o *StringOption) action() Action    { return o.Action }
+
+// BoolOption describes a single boolean flag -- one whose mere presence
+// on the command line sets it, never consuming a following token (see
+// the Action doc comment). It carries the same fields StringOption does;
+// the type itself is what says "this flag is boolean", replacing the
+// old design's isBoolFlag(Dest) runtime check on a BoolVar-bound Dest.
+type BoolOption struct {
+	// Name -- see StringOption.Name.
+	Name string
+
+	// Flag -- see StringOption.Flag.
+	Flag string
+
+	// Long -- see StringOption.Long.
+	Long string
+
+	// Help -- see StringOption.Help.
+	Help string
+
+	// Dest binds the parsed value to a variable. See BoolVar.
+	Dest Value
+
+	// Default -- see StringOption.Default.
+	Default any
+
+	// Env -- see StringOption.Env.
+	Env string
+
+	// Action -- see StringOption.Action.
+	Action Action
+}
+
+func (o *BoolOption) name() string      { return o.Name }
+func (o *BoolOption) help() string      { return o.Help }
+func (o *BoolOption) env() string       { return o.Env }
+func (o *BoolOption) dest() Value       { return o.Dest }
+func (o *BoolOption) defaultValue() any { return o.Default }
+func (o *BoolOption) flag() string      { return normalizeDashes(o.Flag, 1) }
+func (o *BoolOption) long() string      { return normalizeDashes(o.Long, 2) }
+func (o *BoolOption) action() Action    { return o.Action }
+
 // Action is a hook that runs when its Option's flag is seen on the
-// command line. Parse calls it as opt.Action(c, opt, value): c is the
-// Command being parsed (so an Action can call
+// command line. Parse calls it as opt.action()(c, opt, value): c is
+// the Command being parsed (so an Action can call
 // c.PrintHelp/c.PrintVersion/c.PrintErrorf, exactly like Parse itself
 // does), opt is the matched Option itself (so an Action can refer back
-// to its own Flag/Long/Name/Help, e.g. when building a message through
-// c.PrintErrorf), and value is the same string Parse would hand (or
-// just handed) to Dest.Set: the token consumed from the command line
-// by default, or "true" for a flag that opts out of consuming one --
-// see Dest's doc comment and isBoolFlag; an Action-only Option (no
-// Dest at all) still consumes a value by default, exactly like any
-// other flag, unless its Dest is explicitly set to something
-// boolean-like (a plain BoolVar, even one nothing else ever reads).
+// to its own declared fields by asserting it to its concrete type,
+// e.g. opt.(*StringOption).Flag, or by calling the small set of
+// unexported accessor methods available to code inside this package),
+// and value is the same string Parse would hand (or just handed) to
+// Dest.Set: the token consumed from the command line by default, or
+// "true" for a flag that opts out of consuming one -- see Dest's doc
+// comment and BoolOption's; an Action-only Option (no Dest at all)
+// still consumes a value by default, exactly like any other flag,
+// unless it is declared as a *BoolOption -- the type itself is what
+// opts it out, not anything about its Dest (a BoolOption can still
+// leave Dest nil and rely on Action alone).
 //
 // An Option may set Dest, Action, both, or neither. When both are set,
 // Dest resolves first -- Action only runs if Dest.Set succeeded, and
@@ -235,103 +411,14 @@ type Argument struct {
 // to return ErrHelp, ErrVersion, or any other *Error (e.g. built with
 // newError) if that's the exit behavior it wants. This is how the
 // built-in -h/--help and -v/--version flags get their behavior (see
-// allOptions): each binds Dest to a BoolVar over a throwaway bool
-// (never consuming a token, value always "true") and sets Action to a
+// options): each is a BoolOption with Dest bound to a BoolVar
+// (never consuming a token, value always "true") and Action set to a
 // closure that prints and returns ErrHelp/ErrVersion. A caller-declared
 // Option can set its own Action exactly the same way, with no special
 // status over the built-in ones -- optionally alongside a Dest of its
 // own, and opting out of consuming a value the exact same way the
 // built-ins do.
 type Action func(c *Command, opt Option, value string) *Error
-
-// Option describes a single flag (e.g. "-f, --foo"). Unlike Argument, the
-// order of Options in Command.Options has no effect on parsing: flags can
-// appear in any order on the command line.
-type Option struct {
-	// Name is an optional, stable identifier for this Option, decoupled
-	// from Flag/Long. It exists for two purposes: as the preferred
-	// source for the generated help placeholder (e.g. "<BAR>", falling
-	// back to Long then Flag when Name is unset), and, in a future
-	// bind/AutoBind feature, as the key used to match this Option
-	// against a config struct field -- something Flag/Long ("-b",
-	// "--bar") are not well suited for, since they're user-facing
-	// display text rather than a stable identity.
-	Name string
-
-	// Flag is the short flag form, e.g. "f" or "-f" -- the leading dash
-	// is optional and added automatically if omitted. Optional field.
-	//
-	// Declaring both this and the matching Long form of a built-in
-	// (-h and --help, or -v and --version), whether on one Option or
-	// split across several, suppresses that built-in entry from the
-	// generated help and from Parse's dispatch; declaring only one of
-	// the two forms is a conflict, rejected by Validate. The one
-	// exception is -v: declaring it without --version makes the
-	// version built-in use -V instead. See allOptions' doc comment.
-	Flag string
-
-	// Long is the long flag form, e.g. "bar" or "--bar" -- the leading "--"
-	// is optional and added automatically if omitted. Optional, though at
-	// least one of Flag/Long should be set.
-	//
-	// See Flag's doc comment for how declaring a built-in's forms
-	// affects that built-in. In particular, declaring "--version"
-	// while leaving "-v" free is a conflict, not a fallback: only a
-	// claimed "-v" makes the version built-in switch to "-V".
-	Long string
-
-	// Help explains what the option does. Shown in the generated
-	// "Options:" help section.
-	Help string
-
-	// Dest binds the parsed value to a variable. See StringVar, BoolVar,
-	// IntVar. A BoolVar binding makes this a boolean flag that never
-	// consumes a following token; leaving Dest nil does NOT do the
-	// same when Action is set -- see the Action doc comment. May be
-	// combined with Action -- see the Action doc comment for the exact
-	// resolution order.
-	Dest Value
-
-	// Default is shown in the help text as "(default: ...)" and is
-	// assigned to Dest before Env and the command line are considered.
-	Default any
-
-	// Env, if set, is the environment variable consulted when this
-	// option is not provided on the command line.
-	Env string
-
-	// Action, if set, runs when this Option's flag is seen on the
-	// command line -- see the Action doc comment for its exact contract
-	// and how it combines with Dest. Used by allOptions to give its
-	// synthesized -h/--help and -v/--version entries real behavior; a
-	// caller-declared Option can set this too, optionally alongside
-	// Dest, with no special status over the built-in ones.
-	Action Action
-}
-
-// flag returns o.Flag in its normalized short-flag form: a single
-// leading dash followed by the rest of the string with any existing
-// leading dashes stripped. "f", "-f", and "--f" all normalize to "-f".
-// Idempotent on an already-normalized or empty o.Flag.
-func (o Option) flag() string {
-	if o.Flag == "" {
-		return o.Flag
-	}
-	return "-" + strings.TrimLeft(o.Flag, "-")
-}
-
-// long returns o.Long in its normalized long-flag form: two leading
-// dashes followed by the rest of the string with any existing leading
-// dashes stripped. "bar", "-bar", "--bar", and "---bar" all normalize to
-// "--bar" -- a single leading dash is treated the same as no dash at
-// all, so "-bar" (a likely typo) is normalized rather than rejected.
-// Idempotent on an already-normalized or empty o.Long.
-func (o Option) long() string {
-	if o.Long == "" {
-		return o.Long
-	}
-	return "--" + strings.TrimLeft(o.Long, "-")
-}
 
 // EnvVar describes a standalone environment variable: one not bound to
 // any Argument or Option's Env field. Unlike Argument/Option, it has no
@@ -425,7 +512,7 @@ func (c *Command) stderr() io.Writer {
 	return os.Stderr
 }
 
-// allOptions returns a generator function that yields every Option in
+// options returns a generator function that yields every Option in
 // the Command, including the built-in -h/--help and -v/--version entries.
 // The generator yields user-declared Options first, then the built-in
 // entries last. The generator stops yielding when yield returns false.
@@ -449,7 +536,7 @@ func (c *Command) stderr() io.Writer {
 // too, the short form is dropped and only --version is yielded. Help has
 // no such fallback: -H conventionally means "host", so the help built-in
 // is either -h/--help or suppressed.
-func (c *Command) allOptions() iter.Seq[Option] {
+func (c *Command) options() iter.Seq[Option] {
 	return func(yield func(Option) bool) {
 		for _, opt := range c.Options {
 			if !yield(opt) {
@@ -458,13 +545,16 @@ func (c *Command) allOptions() iter.Seq[Option] {
 		}
 
 		// -h/--help and -v/--version must never consume a following
-		// token, so each binds Dest to a plain BoolVar -- an Option
-		// with an Action but no Dest otherwise defaults to consuming a
-		// value (see the value-determination comment in Parse), and a
-		// boolean Dest is how any Option opts back out of that, built-in
-		// or not. discard is never read; it exists purely so BoolVar has
-		// somewhere to write "true" -- neither built-in has any value of
-		// its own to store.
+		// token -- each is declared as a *BoolOption below, which is
+		// what opts it out (see the value-determination comment in
+		// Parse): an Option with an Action but no Dest otherwise
+		// defaults to consuming a value, and being a *BoolOption is
+		// what says otherwise, built-in or not, independent of Dest.
+		// Each built-in still binds Dest to a plain BoolVar anyway, so
+		// Dest.Set has somewhere to write "true" (Dest resolves before
+		// Action -- see the Action doc comment); discard itself is
+		// never read, since neither built-in has any value of its own
+		// to store.
 		var discard bool
 
 		// Which normalized Flag/Long forms the user-declared Options
@@ -489,7 +579,7 @@ func (c *Command) allOptions() iter.Seq[Option] {
 		// --help) leaves the built-in intact, and validateOptions
 		// then reports the resulting duplicate.
 		if !(takenFlags["-h"] && takenLongs["--help"]) {
-			if !yield(Option{
+			if !yield(&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Print help",
 				Dest: BoolVar(&discard),
 				Action: func(c *Command, opt Option, value string) *Error {
@@ -520,7 +610,7 @@ func (c *Command) allOptions() iter.Seq[Option] {
 				}
 			}
 
-			yield(Option{
+			yield(&BoolOption{
 				Flag: short, Long: "--version", Help: "Print version",
 				Dest: BoolVar(&discard),
 				Action: func(c *Command, opt Option, value string) *Error {
@@ -548,16 +638,16 @@ func (c *Command) allOptions() iter.Seq[Option] {
 func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 	return func(yield func(EnvVar) bool) {
 		for _, arg := range c.Arguments {
-			if arg.Env != "" {
-				if !yield(EnvVar{Name: arg.Env, Help: arg.Help, Dest: arg.Dest, Default: arg.Default}) {
+			if arg.env() != "" {
+				if !yield(EnvVar{Name: arg.env(), Help: arg.help(), Dest: arg.dest(), Default: arg.defaultValue()}) {
 					return
 				}
 			}
 		}
 
-		for opt := range c.allOptions() {
-			if opt.Env != "" {
-				if !yield(EnvVar{Name: opt.Env, Help: opt.Help, Dest: opt.Dest, Default: opt.Default}) {
+		for opt := range c.options() {
+			if opt.env() != "" {
+				if !yield(EnvVar{Name: opt.env(), Help: opt.help(), Dest: opt.dest(), Default: opt.defaultValue()}) {
 					return
 				}
 			}
@@ -577,18 +667,23 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 // yields entries that declare an Env name): a Default applies whether
 // or not the item also has an Env, so this doesn't filter by Env, or
 // even by whether Dest/Default themselves are set -- applyDefaults'
-// own nil checks decide which pairs actually do anything. The
-// generator stops yielding when yield returns false.
+// own nil checks decide which pairs actually do anything. Options are
+// walked via c.Options directly, NOT options() -- unlike allEnvVars --
+// since a synthesized -h/--help or -v/--version built-in never has a
+// Default of its own (its Dest is always a discard BoolVar), so
+// including it here would only add nil-Default noise for
+// applyDefaults to skip right back over.
+// The generator stops yielding when yield returns false.
 func (c *Command) allDefaults() iter.Seq2[Value, any] {
 	return func(yield func(Value, any) bool) {
 		for _, arg := range c.Arguments {
-			if !yield(arg.Dest, arg.Default) {
+			if !yield(arg.dest(), arg.defaultValue()) {
 				return
 			}
 		}
 
 		for _, opt := range c.Options {
-			if !yield(opt.Dest, opt.Default) {
+			if !yield(opt.dest(), opt.defaultValue()) {
 				return
 			}
 		}
@@ -618,11 +713,11 @@ func (c *Command) allDefaults() iter.Seq2[Value, any] {
 //  5. Normalized Flag is exactly 2 characters if set.
 //  6. A built-in (-h/--help, -v/--version) whose both normalized forms
 //     are claimed by the user-declared Options is suppressed, not
-//     yielded by allOptions(). The version built-in also falls back to
+//     yielded by options(). The version built-in also falls back to
 //     -V (or to --version alone) when -v is claimed without
-//     --version; see allOptions' doc comment.
+//     --version; see options' doc comment.
 //  7. Normalized Flag and Long are each unique across the effective
-//     Option set (allOptions() -- user-declared Options plus whichever
+//     Option set (options() -- user-declared Options plus whichever
 //     built-ins survived suppression), so a partial claim on a
 //     built-in's forms is rejected as a real conflict.
 //  8. Same Default/Dest type check as Arguments, for Options.
@@ -655,11 +750,11 @@ func (c *Command) Validate() *Error {
 	}
 
 	// Options validation. Runs against the effective Option set --
-	// c.allOptions(), not c.Options -- so a user-declared Option that
+	// c.options(), not c.Options -- so a user-declared Option that
 	// collides with a synthesized built-in (a partial claim on -h or
 	// --help, say) is caught here exactly like any other duplicate
-	// flag. See allOptions' doc comment for the suppression rule.
-	if err := validateOptions(slices.Collect(c.allOptions())); err != nil {
+	// flag. See options' doc comment for the suppression rule.
+	if err := validateOptions(slices.Collect(c.options())); err != nil {
 		return newError(1, "%s", err)
 	}
 
@@ -681,7 +776,8 @@ func validateArguments(args []Argument) error {
 	for _, arg := range args {
 		// Every Argument needs a display name -- it's what shows up in
 		// the usage line (e.g. "[qux]") and the Arguments: help section.
-		if arg.Name == "" {
+		name := arg.name()
+		if name == "" {
 			return errors.New("cli: Argument.Name must not be empty")
 		}
 
@@ -689,12 +785,12 @@ func validateArguments(args []Argument) error {
 		// Arguments in declaration order, so a duplicate name would be
 		// ambiguous in help output even though parsing itself doesn't
 		// use Name as a lookup key.
-		if seenNames[arg.Name] {
-			return fmt.Errorf("cli: duplicate argument name %q", arg.Name)
+		if seenNames[name] {
+			return fmt.Errorf("cli: duplicate argument name %q", name)
 		}
-		seenNames[arg.Name] = true
+		seenNames[name] = true
 
-		if err := validateDefaultType(arg.Dest, arg.Default); err != nil {
+		if err := validateDefaultType(arg.dest(), arg.defaultValue()); err != nil {
 			return err
 		}
 	}
@@ -707,9 +803,9 @@ func validateArguments(args []Argument) error {
 // validateArguments, for the same reason.
 //
 // Validate calls this with the effective Option set
-// (slices.Collect(c.allOptions())), not c.Options, so a user-declared
+// (slices.Collect(c.options())), not c.Options, so a user-declared
 // Option colliding with a synthesized built-in is caught here exactly
-// like two user-declared Options colliding. See allOptions' doc
+// like two user-declared Options colliding. See options' doc
 // comment for the suppression rule that decides which built-ins are
 // even present in that effective set.
 func validateOptions(opts []Option) error {
@@ -734,7 +830,7 @@ func validateOptions(opts []Option) error {
 			// output use a constant-width Flag column instead of
 			// computing one per Command.
 			if len(flag) != 2 {
-				return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", opt.Flag)
+				return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
 			}
 			if seenFlag[flag] {
 				return fmt.Errorf("cli: duplicate option flag form %q", flag)
@@ -752,7 +848,7 @@ func validateOptions(opts []Option) error {
 			seenLong[long] = true
 		}
 
-		if err := validateDefaultType(opt.Dest, opt.Default); err != nil {
+		if err := validateDefaultType(opt.dest(), opt.defaultValue()); err != nil {
 			return err
 		}
 	}
@@ -777,23 +873,25 @@ func (c *Command) validateEnvVars() error {
 	seen := make(map[string]bool)
 
 	for _, arg := range c.Arguments {
-		if arg.Env == "" {
+		env := arg.env()
+		if env == "" {
 			continue
 		}
-		if seen[arg.Env] {
-			return fmt.Errorf("cli: duplicate environment variable %q", arg.Env)
+		if seen[env] {
+			return fmt.Errorf("cli: duplicate environment variable %q", env)
 		}
-		seen[arg.Env] = true
+		seen[env] = true
 	}
 
 	for _, opt := range c.Options {
-		if opt.Env == "" {
+		env := opt.env()
+		if env == "" {
 			continue
 		}
-		if seen[opt.Env] {
-			return fmt.Errorf("cli: duplicate environment variable %q", opt.Env)
+		if seen[env] {
+			return fmt.Errorf("cli: duplicate environment variable %q", env)
 		}
-		seen[opt.Env] = true
+		seen[env] = true
 	}
 
 	for _, env := range c.EnvVars {
@@ -907,7 +1005,7 @@ func (c *Command) Parse(args []string) *Error {
 
 	// Normalized lookup maps built once, ahead of the token loop, so
 	// each dash-prefixed token below resolves to its Option in O(1)
-	// instead of scanning c.Options per token. Built from allOptions(),
+	// instead of scanning c.Options per token. Built from options(),
 	// not c.Options directly, so the synthesized -h/--help and
 	// -v/--version entries share this exact same lookup and dispatch
 	// path -- Parse never special-cases their tokens or their
@@ -915,7 +1013,7 @@ func (c *Command) Parse(args []string) *Error {
 	// any other Option.
 	flagOpts := make(map[string]Option, len(c.Options)+2)
 	longOpts := make(map[string]Option, len(c.Options)+2)
-	for opt := range c.allOptions() {
+	for opt := range c.options() {
 		if flag := opt.flag(); flag != "" {
 			flagOpts[flag] = opt
 		}
@@ -958,7 +1056,7 @@ func (c *Command) Parse(args []string) *Error {
 
 			// value is what Dest.Set (if Dest is set) and Action (if
 			// Action is set) both receive. hasValue true (an attached
-			// "=value") always wins over the isBoolFlag check below --
+			// "=value") always wins over the *BoolOption check below --
 			// that's how "--flag=false" is able to override a boolean
 			// Dest explicitly, instead of the bare-presence "true" a bool
 			// flag gets otherwise. Absent an attached value, the default
@@ -966,16 +1064,17 @@ func (c *Command) Parse(args []string) *Error {
 			// value-taking flag -- including an Action-only Option with
 			// no Dest at all, so an Action always gets a real value
 			// unless something says otherwise. The one thing that says
-			// otherwise is isBoolFlag(opt.Dest): a boolean Dest (BoolVar)
-			// makes this Option boolean-like, so value is just "true"
-			// and no token is consumed. isBoolFlag(nil) is false, so a
-			// nil Dest does NOT opt out on its own -- an Action-only
-			// Option that must never consume a token needs an explicit
-			// BoolVar Dest to say so, the way the built-in -h/--help and
-			// -v/--version do (see allOptions).
+			// otherwise is opt's own concrete type: a *BoolOption never
+			// consumes a token, so value is just "true" regardless of
+			// what its Dest is (or whether it has one at all) -- the
+			// type itself is the boolean-ness signal, not a runtime check
+			// on Dest (see BoolOption's doc comment above). An
+			// Action-only Option that must never consume a token needs
+			// to be declared as a *BoolOption to say so, the way the
+			// built-in -h/--help and -v/--version do (see options).
 			if !hasValue {
 				value = "true"
-				if !isBoolFlag(opt.Dest) {
+				if _, ok := opt.(*BoolOption); !ok {
 					i++
 					if i >= len(args) {
 						return c.PrintErrorf("option %q requires a value", tok)
@@ -987,15 +1086,15 @@ func (c *Command) Parse(args []string) *Error {
 			// Dest resolves first, if set: Action (below) receives the
 			// exact same value, and only runs at all if Dest.Set
 			// succeeded.
-			if opt.Dest != nil {
-				if setErr := opt.Dest.Set(value); setErr != nil {
+			if dest := opt.dest(); dest != nil {
+				if setErr := dest.Set(value); setErr != nil {
 					return c.PrintErrorf("option %q: %w", tok, setErr)
 				}
 			}
 
 			// See the Action doc comment for its nil/non-nil contract.
-			if opt.Action != nil {
-				if err := opt.Action(c, opt, value); err != nil {
+			if action := opt.action(); action != nil {
+				if err := action(c, opt, value); err != nil {
 					return err
 				}
 			}
@@ -1009,10 +1108,11 @@ func (c *Command) Parse(args []string) *Error {
 			arg := c.Arguments[argIndex]
 			argIndex++
 
-			if arg.Dest == nil {
+			dest := arg.dest()
+			if dest == nil {
 				continue
 			}
-			if setErr := arg.Dest.Set(tok); setErr != nil {
+			if setErr := dest.Set(tok); setErr != nil {
 				return c.PrintErrorf("argument %q: %w", tok, setErr)
 			}
 		}
@@ -1156,7 +1256,7 @@ func (c *Command) UsageString() string {
 	// "[options]" placeholder, so they don't need to be listed here.
 	var args strings.Builder
 	for _, arg := range c.Arguments {
-		fmt.Fprintf(&args, " [%s]", arg.Name)
+		fmt.Fprintf(&args, " [%s]", arg.name())
 	}
 
 	// The usage line is always "Usage: <program name> [options] [arg1] [arg2] ..."
@@ -1183,7 +1283,7 @@ func (c *Command) PrintUsage() {
 // Environment Variables is omitted when no Option or Argument declares
 // an Env name. Options is never omitted -- it always contains at least
 // the synthesized -h/--help entry (unless the user-declared Options
-// claim both of its forms -- see allOptions' doc comment), plus
+// claim both of its forms -- see options' doc comment), plus
 // -v/--version when Version is set, both always listed last.
 func (c *Command) HelpString() string {
 	var b strings.Builder
@@ -1196,13 +1296,13 @@ func (c *Command) HelpString() string {
 	// combined below, not how each is computed.
 	widthArgs := 0
 	for _, arg := range c.Arguments {
-		w := len(arg.Name)
+		w := len(arg.name())
 		if w > widthArgs {
 			widthArgs = w
 		}
 	}
 	widthOpts := 0
-	for opt := range c.allOptions() {
+	for opt := range c.options() {
 		w := len(opt.long()) + 4 // 4 = len("-x, ")
 		if w > widthOpts {
 			widthOpts = w
@@ -1229,18 +1329,18 @@ func (c *Command) HelpString() string {
 	if len(c.Arguments) > 0 {
 		fmt.Fprintf(&b, "\nArguments:\n")
 		for _, arg := range c.Arguments {
-			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.Name, arg.Help)
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.name(), arg.help())
 		}
 	}
 
-	// allOptions() yields the user-declared Options, then the built-in -h/--help
+	// options() yields the user-declared Options, then the built-in -h/--help
 	// and -v/--version entries (if Version is set). The latter two are always
 	// listed last, so they don't get lost in the middle of a long list of user
 	// flags. A built-in is omitted only when the user claims both of its
-	// forms (see allOptions' doc comment), in which case a user-declared
+	// forms (see options' doc comment), in which case a user-declared
 	// Option takes its place, so the Options section is never empty.
 	fmt.Fprintf(&b, "\nOptions:\n")
-	for opt := range c.allOptions() {
+	for opt := range c.options() {
 		flag := opt.flag()
 		long := opt.long()
 		if flag != "" && long != "" {
@@ -1248,7 +1348,7 @@ func (c *Command) HelpString() string {
 		}
 		fmt.Fprintf(&b,
 			"  %-3s %-*s   %s\n",
-			flag, width-4, opt.long(), opt.Help, // 4 = len("-x, ")
+			flag, width-4, opt.long(), opt.help(), // 4 = len("-x, ")
 		)
 	}
 
