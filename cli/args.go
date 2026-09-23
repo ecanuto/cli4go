@@ -167,7 +167,7 @@ func validateArgumentName(name string) error {
 // by the compiler (see validateDefaultType's doc comment for the one
 // place that check still happens at runtime).
 func validateArguments(args []Argument) error {
-	seenNames := make(map[string]bool, len(args))
+	seen := make(map[string]bool, len(args))
 	for _, arg := range args {
 		// Per-item rules live on the Argument itself.
 		if err := arg.validate(); err != nil {
@@ -179,10 +179,10 @@ func validateArguments(args []Argument) error {
 		// Arguments in declaration order, so a duplicate name would be
 		// ambiguous in help output even though parsing itself doesn't
 		// use Name as a lookup key.
-		if seenNames[name] {
+		if seen[name] {
 			return fmt.Errorf("cli: duplicate argument name %q", name)
 		}
-		seenNames[name] = true
+		seen[name] = true
 	}
 	return nil
 }
