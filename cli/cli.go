@@ -16,14 +16,15 @@ import (
 )
 
 // Value is implemented by anything that can be set from a single
-// command-line token. cli4go ships implementations for common types (see
-// StringVar, BoolVar, IntVar), used internally by the typed Argument/
-// Option family (StringArgument, StringOption, BoolOption bind Dest
-// directly to a native pointer, e.g. *string, wrapping it in a Value
-// only when Parse needs one) and available directly for a standalone
-// EnvVar's Dest, which has no typed family of its own -- a custom type
-// can implement Value to bind an EnvVar to something StringVar/BoolVar/
-// IntVar don't cover.
+// command-line token. cli4go ships implementations for common types
+// (see StringVar, BoolVar, IntVar). The typed Argument/Option family
+// (StringArgument, StringOption, BoolOption, IntOption, ...) binds Dest
+// directly to a native pointer (e.g. *string) and reuses these same
+// concrete implementations internally, without going through StringVar/
+// BoolVar/IntVar themselves (see e.g. StringArgument.dest's doc
+// comment) -- those constructors remain the public way to bind a
+// standalone EnvVar's Dest, which has no typed family of its own, or to
+// bind a custom Value implementation there.
 type Value interface {
 	// String returns the current value, formatted for display (used in
 	// generated help text, e.g. when rendering defaults).
