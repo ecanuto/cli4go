@@ -17,8 +17,13 @@ import (
 
 // Value is implemented by anything that can be set from a single
 // command-line token. cli4go ships implementations for common types (see
-// StringVar, BoolVar, IntVar); custom types can implement Value themselves
-// to be used as an Option or Argument binding.
+// StringVar, BoolVar, IntVar), used internally by the typed Argument/
+// Option family (StringArgument, StringOption, BoolOption bind Dest
+// directly to a native pointer, e.g. *string, wrapping it in a Value
+// only when Parse needs one) and available directly for a standalone
+// EnvVar's Dest, which has no typed family of its own -- a custom type
+// can implement Value to bind an EnvVar to something StringVar/BoolVar/
+// IntVar don't cover.
 type Value interface {
 	// String returns the current value, formatted for display (used in
 	// generated help text, e.g. when rendering defaults).
@@ -168,12 +173,13 @@ var (
 // command line.
 //
 // Argument is implemented by a family of typed structs -- StringArgument
-// today, with more (IntArgument, BoolArgument, ...) planned -- instead of
-// by one struct carrying a Dest/Default pair whose concrete type has to
-// be inferred at runtime (the old design, still visible as comments in
-// cli.go on the exp/typed-fields branch). Each concrete type owns its
-// Default (and, eventually, its parsed value) as its own Go type, so
-// there is nothing to type-switch on.
+// and IntArgument today, with more (BoolArgument, ...) planned -- instead
+// of by one struct carrying a Dest/Default pair whose concrete type has
+// to be inferred at runtime (the old design, still visible as comments
+// in cli.go on the exp/typed-fields branch). Each concrete type owns its
+// Dest and Default as its own Go type (e.g. *string/string, *int/int),
+// so there is nothing to type-switch on, and the compiler keeps Default
+// in sync with Dest for free.
 //
 // The interface itself is unexported-method-only, mirroring the
 // Option.flag()/Option.long() pattern already used elsewhere in this
@@ -203,34 +209,83 @@ type StringArgument struct {
 	// "Arguments:" help section.
 	Help string
 
-	// Dest binds the parsed value to a variable. See StringVar, BoolVar,
-	// IntVar.
-	Dest Value
+	// Dest binds the parsed value directly to a string variable, e.g.
+	// &cfg.Qux. Optional.
+	Dest *string
 
 	// Default is shown in the help text as "(default: ...)" and is
 	// assigned to Dest before Env and the command line are considered.
-	Default any
+	// Its zero value ("") applies just like any other value -- there
+	// is no separate "unset" state, the same way a stdlib flag always
+	// has a default, even an empty one.
+	Default string
 
 	// Env, if set, is the environment variable consulted when this
 	// argument is not provided on the command line.
 	Env string
 }
 
-func (a *StringArgument) name() string      { return a.Name }
-func (a *StringArgument) help() string      { return a.Help }
-func (a *StringArgument) env() string       { return a.Env }
-func (a *StringArgument) dest() Value       { return a.Dest }
+func (a *StringArgument) name() string { return a.Name }
+func (a *StringArgument) help() string { return a.Help }
+func (a *StringArgument) env() string  { return a.Env }
+
+// dest wraps Dest in a Value only here, at the point Parse/applyDefaults/
+// applyEnvVars actually need one -- Dest itself stays a plain *string, so
+// a struct literal never has to build one (see Value's doc comment).
+func (a *StringArgument) dest() Value {
+	if a.Dest == nil {
+		return nil
+	}
+	return &stringValue{v: a.Dest}
+}
+
 func (a *StringArgument) defaultValue() any { return a.Default }
+
+// IntArgument describes a single int-typed positional argument -- the
+// Argument implementation for a value that must parse as a Go int
+// (strconv.Atoi). Same fields and shape as StringArgument; see its doc
+// comment for Dest/Default's ergonomics and semantics.
+type IntArgument struct {
+	// Name -- see StringArgument.Name.
+	Name string
+
+	// Help -- see StringArgument.Help.
+	Help string
+
+	// Dest binds the parsed value directly to an int variable, e.g.
+	// &cfg.Count. Optional.
+	Dest *int
+
+	// Default -- see StringArgument.Default.
+	Default int
+
+	// Env -- see StringArgument.Env.
+	Env string
+}
+
+func (a *IntArgument) name() string { return a.Name }
+func (a *IntArgument) help() string { return a.Help }
+func (a *IntArgument) env() string  { return a.Env }
+
+// dest -- see StringArgument.dest's doc comment; same reasoning here.
+func (a *IntArgument) dest() Value {
+	if a.Dest == nil {
+		return nil
+	}
+	return &intValue{v: a.Dest}
+}
+
+func (a *IntArgument) defaultValue() any { return a.Default }
 
 // Option describes a single flag (e.g. "-f, --foo"). Unlike Argument, the
 // order of Options in Command.Options has no effect on parsing: flags can
 // appear in any order on the command line.
 //
-// Option is implemented by a family of typed structs -- StringOption and
-// BoolOption today, with more (IntOption, ...) planned -- instead of one
-// struct carrying a Dest/Default pair whose concrete type has to be
-// inferred at runtime. See StringOption and BoolOption, and Argument's
-// doc comment above for the same reasoning applied there.
+// Option is implemented by a family of typed structs -- StringOption,
+// IntOption, and BoolOption today -- instead of one struct carrying a
+// Dest/Default pair whose concrete type has to be inferred at runtime.
+// See StringOption, IntOption, and BoolOption, and Argument's doc
+// comment above for the same reasoning applied there.
 //
 // The interface itself is unexported-method-only: a concrete type keeps
 // its fields public (Name, Flag, Long, ...) for struct-literal
@@ -307,14 +362,17 @@ type StringOption struct {
 	// "Options:" help section.
 	Help string
 
-	// Dest binds the parsed value to a variable. See StringVar, BoolVar,
-	// IntVar. May be combined with Action -- see the Action doc comment
-	// for the exact resolution order.
-	Dest Value
+	// Dest binds the parsed value directly to a string variable, e.g.
+	// &cfg.Bar. Optional. May be combined with Action -- see the Action
+	// doc comment for the exact resolution order.
+	Dest *string
 
 	// Default is shown in the help text as "(default: ...)" and is
 	// assigned to Dest before Env and the command line are considered.
-	Default any
+	// Its zero value ("") applies just like any other value -- there
+	// is no separate "unset" state, the same way a stdlib flag always
+	// has a default, even an empty one.
+	Default string
 
 	// Env, if set, is the environment variable consulted when this
 	// option is not provided on the command line.
@@ -326,14 +384,72 @@ type StringOption struct {
 	Action Action
 }
 
-func (o *StringOption) name() string      { return o.Name }
-func (o *StringOption) help() string      { return o.Help }
-func (o *StringOption) env() string       { return o.Env }
-func (o *StringOption) dest() Value       { return o.Dest }
+func (o *StringOption) name() string { return o.Name }
+func (o *StringOption) help() string { return o.Help }
+func (o *StringOption) env() string  { return o.Env }
+
+// dest -- see StringArgument.dest's doc comment; same reasoning here.
+func (o *StringOption) dest() Value {
+	if o.Dest == nil {
+		return nil
+	}
+	return &stringValue{v: o.Dest}
+}
+
 func (o *StringOption) defaultValue() any { return o.Default }
 func (o *StringOption) flag() string      { return normalizeDashes(o.Flag, 1) }
 func (o *StringOption) long() string      { return normalizeDashes(o.Long, 2) }
 func (o *StringOption) action() Action    { return o.Action }
+
+// IntOption describes a single flag whose value must parse as a Go int
+// (strconv.Atoi) -- the Option implementation for the common case of an
+// integer-valued flag, e.g. "-n 7". Same fields and shape as
+// StringOption; see its doc comment for Dest/Default's ergonomics and
+// semantics, and Flag/Long's for how a built-in's forms are affected.
+type IntOption struct {
+	// Name -- see StringOption.Name.
+	Name string
+
+	// Flag -- see StringOption.Flag.
+	Flag string
+
+	// Long -- see StringOption.Long.
+	Long string
+
+	// Help -- see StringOption.Help.
+	Help string
+
+	// Dest binds the parsed value directly to an int variable, e.g.
+	// &cfg.Count. Optional. May be combined with Action -- see the
+	// Action doc comment for the exact resolution order.
+	Dest *int
+
+	// Default -- see StringOption.Default.
+	Default int
+
+	// Env -- see StringOption.Env.
+	Env string
+
+	// Action -- see StringOption.Action.
+	Action Action
+}
+
+func (o *IntOption) name() string { return o.Name }
+func (o *IntOption) help() string { return o.Help }
+func (o *IntOption) env() string  { return o.Env }
+
+// dest -- see StringArgument.dest's doc comment; same reasoning here.
+func (o *IntOption) dest() Value {
+	if o.Dest == nil {
+		return nil
+	}
+	return &intValue{v: o.Dest}
+}
+
+func (o *IntOption) defaultValue() any { return o.Default }
+func (o *IntOption) flag() string      { return normalizeDashes(o.Flag, 1) }
+func (o *IntOption) long() string      { return normalizeDashes(o.Long, 2) }
+func (o *IntOption) action() Action    { return o.Action }
 
 // BoolOption describes a single boolean flag -- one whose mere presence
 // on the command line sets it, never consuming a following token (see
@@ -353,11 +469,12 @@ type BoolOption struct {
 	// Help -- see StringOption.Help.
 	Help string
 
-	// Dest binds the parsed value to a variable. See BoolVar.
-	Dest Value
+	// Dest binds the parsed value directly to a bool variable, e.g.
+	// &cfg.Foo. Optional.
+	Dest *bool
 
 	// Default -- see StringOption.Default.
-	Default any
+	Default bool
 
 	// Env -- see StringOption.Env.
 	Env string
@@ -366,10 +483,18 @@ type BoolOption struct {
 	Action Action
 }
 
-func (o *BoolOption) name() string      { return o.Name }
-func (o *BoolOption) help() string      { return o.Help }
-func (o *BoolOption) env() string       { return o.Env }
-func (o *BoolOption) dest() Value       { return o.Dest }
+func (o *BoolOption) name() string { return o.Name }
+func (o *BoolOption) help() string { return o.Help }
+func (o *BoolOption) env() string  { return o.Env }
+
+// dest -- see StringArgument.dest's doc comment; same reasoning here.
+func (o *BoolOption) dest() Value {
+	if o.Dest == nil {
+		return nil
+	}
+	return &boolValue{v: o.Dest}
+}
+
 func (o *BoolOption) defaultValue() any { return o.Default }
 func (o *BoolOption) flag() string      { return normalizeDashes(o.Flag, 1) }
 func (o *BoolOption) long() string      { return normalizeDashes(o.Long, 2) }
@@ -581,7 +706,7 @@ func (c *Command) options() iter.Seq[Option] {
 		if !(takenFlags["-h"] && takenLongs["--help"]) {
 			if !yield(&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Print help",
-				Dest: BoolVar(&discard),
+				Dest: &discard,
 				Action: func(c *Command, opt Option, value string) *Error {
 					c.PrintHelp()
 					return ErrHelp
@@ -612,7 +737,7 @@ func (c *Command) options() iter.Seq[Option] {
 
 			yield(&BoolOption{
 				Flag: short, Long: "--version", Help: "Print version",
-				Dest: BoolVar(&discard),
+				Dest: &discard,
 				Action: func(c *Command, opt Option, value string) *Error {
 					c.PrintVersion()
 					return ErrVersion
@@ -707,24 +832,25 @@ func (c *Command) allDefaults() iter.Seq2[Value, any] {
 // Checks, in order:
 //  1. Command.Name non-empty.
 //  2. Every Argument.Name non-empty and unique.
-//  3. Every Argument's Default (if set) type-matches its Dest's concrete
-//     type.
-//  4. Every Option has Flag and/or Long set.
-//  5. Normalized Flag is exactly 2 characters if set.
-//  6. A built-in (-h/--help, -v/--version) whose both normalized forms
+//  3. Every Option has Flag and/or Long set.
+//  4. Normalized Flag is exactly 2 characters if set.
+//  5. A built-in (-h/--help, -v/--version) whose both normalized forms
 //     are claimed by the user-declared Options is suppressed, not
 //     yielded by options(). The version built-in also falls back to
 //     -V (or to --version alone) when -v is claimed without
 //     --version; see options' doc comment.
-//  7. Normalized Flag and Long are each unique across the effective
+//  6. Normalized Flag and Long are each unique across the effective
 //     Option set (options() -- user-declared Options plus whichever
 //     built-ins survived suppression), so a partial claim on a
 //     built-in's forms is rejected as a real conflict.
-//  8. Same Default/Dest type check as Arguments, for Options.
-//  9. Every standalone EnvVar.Name is non-empty.
-//  10. Every environment variable name -- from Arguments' Env, Options'
+//  7. Every standalone EnvVar.Name is non-empty.
+//  8. Every environment variable name -- from Arguments' Env, Options'
 //     Env, and EnvVars -- is unique across all three.
-//  11. Same Default/Dest type check as Arguments/Options, for EnvVars.
+//  9. Every standalone EnvVar's Default (if set) type-matches its
+//     Dest's concrete type -- the one Default/Dest check Validate still
+//     performs at runtime, now that Argument/Option's typed Dest/
+//     Default fields (e.g. StringOption's *string/string pair) are
+//     already kept in sync by the compiler.
 //
 // Dest and Action are not checked against each other -- an Option may
 // set neither, either, or both (see Option.Action's doc comment for
@@ -768,9 +894,12 @@ func (c *Command) Validate() *Error {
 }
 
 // validateArguments checks args for structural problems: an empty or
-// duplicate Name, or a Default whose type doesn't match Dest. It is a
-// free function (not a *Command method) so it stays decoupled from
-// Command and testable on its own, mirroring validateDefaultType below.
+// duplicate Name. It is a free function (not a *Command method) so it
+// stays decoupled from Command and testable on its own. Unlike the old
+// design, there's no Default/Dest type check to run here -- a typed
+// Argument's Default is already the same Go type as its Dest, enforced
+// by the compiler (see validateDefaultType's doc comment for the one
+// place that check still happens at runtime).
 func validateArguments(args []Argument) error {
 	seenNames := make(map[string]bool, len(args))
 	for _, arg := range args {
@@ -789,18 +918,15 @@ func validateArguments(args []Argument) error {
 			return fmt.Errorf("cli: duplicate argument name %q", name)
 		}
 		seenNames[name] = true
-
-		if err := validateDefaultType(arg.dest(), arg.defaultValue()); err != nil {
-			return err
-		}
 	}
 	return nil
 }
 
 // validateOptions checks opts for structural problems: a missing
-// Flag/Long, a malformed Flag, a duplicate Flag/Long, or a Default
-// whose type doesn't match Dest. Same free-function shape as
-// validateArguments, for the same reason.
+// Flag/Long, or a malformed or duplicate Flag/Long. Same free-function
+// shape as validateArguments, for the same reason -- and the same note
+// applies: no Default/Dest type check here, since a typed Option's
+// Default is already the same Go type as its Dest.
 //
 // Validate calls this with the effective Option set
 // (slices.Collect(c.options())), not c.Options, so a user-declared
@@ -846,10 +972,6 @@ func validateOptions(opts []Option) error {
 			}
 			seen[long] = true
 		}
-
-		if err := validateDefaultType(opt.dest(), opt.defaultValue()); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -857,12 +979,14 @@ func validateOptions(opts []Option) error {
 // validateEnvVars checks that every standalone EnvVar.Name is non-empty
 // (mirroring the Argument.Name check in validateArguments), that no
 // environment variable name is declared more than once across
-// Arguments' Env, Options' Env, and EnvVars, and that each EnvVar's
-// Default (if set) type-matches its Dest -- the same check
-// validateArguments/validateOptions run for Argument/Option. A
-// duplicate name would be genuinely ambiguous -- two entries claiming
-// the same environment variable -- and would render as a literal
-// duplicate row in the generated "Environment Variables:" help section.
+// Arguments' Env, Options' Env, and EnvVars, and that each standalone
+// EnvVar's Default (if set) type-matches its Dest -- unlike Argument/
+// Option, EnvVar's Dest/Default pair is still untyped (Value/any), so
+// this is the one place that check still runs at runtime; see
+// validateDefaultType's doc comment. A duplicate name would be
+// genuinely ambiguous -- two entries claiming the same environment
+// variable -- and would render as a literal duplicate row in the
+// generated "Environment Variables:" help section.
 //
 // Unlike validateArguments/validateOptions, this is a *Command method
 // rather than a free function: the name-uniqueness check is inherently
@@ -912,9 +1036,13 @@ func (c *Command) validateEnvVars() error {
 
 // validateDefaultType checks that def, when set, matches the Go type
 // expected by dest's constructor (StringVar -> string, BoolVar -> bool,
-// IntVar -> int). Custom Value implementations -- ones not created by
-// cli4go's own constructors -- are not checked here, since cli4go has
-// no way to know what type they expect.
+// IntVar -> int). Only a standalone EnvVar still needs this check --
+// its Dest/Default pair is untyped (Value/any), unlike Argument/
+// Option's typed Dest/Default fields (e.g. StringOption's *string/
+// string), which the compiler already keeps in sync. Custom Value
+// implementations -- ones not created by cli4go's own constructors --
+// are not checked here, since cli4go has no way to know what type they
+// expect.
 func validateDefaultType(dest Value, def any) error {
 	if dest == nil || def == nil {
 		return nil
@@ -1106,16 +1234,16 @@ func (c *Command) Parse(args []string) *Error {
 // after (the Env half), so a present environment variable still
 // overrides whatever Default set here.
 //
-// def's type has already been checked against dest's concrete type by
-// validateDefaultType/Validate for the three built-in Value kinds
-// (StringVar/BoolVar/IntVar), so a Set failure here can only happen
-// for a custom Value implementation with an incompatible Default --
-// which validateDefaultType deliberately can't check (see its doc
-// comment). That makes it the same kind of problem Validate() itself
-// reports: the Command was declared incorrectly, not something the
-// end user typed -- so, like Validate(), it reports ExitCode() == 1
-// and prints nothing, unlike a bad command-line or Env value (which
-// goes through PrintErrorf instead).
+// A typed Argument/Option's Default is always the same Go type as its
+// Dest (compiler-enforced), so a Set failure here can only come from a
+// standalone EnvVar with a mismatched Dest/Default -- caught first by
+// validateDefaultType/Validate -- or a custom Value implementation
+// Validate deliberately can't check (see validateDefaultType's doc
+// comment). Either way, that makes it the same kind of problem
+// Validate() itself reports: the Command was declared incorrectly, not
+// something the end user typed -- so, like Validate(), it reports
+// ExitCode() == 1 and prints nothing, unlike a bad command-line or Env
+// value (which goes through PrintErrorf instead).
 func (c *Command) applyDefaults() *Error {
 	for dest, def := range c.allDefaults() {
 		if dest == nil || def == nil {

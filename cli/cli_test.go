@@ -296,6 +296,44 @@ func TestOptionLong(t *testing.T) {
 	}
 }
 
+// TestIntArgument_Accessors and TestIntOption_Accessors cover the
+// accessor methods the rest of the suite happens not to reach: Parse/
+// Validate/HelpString already exercise name()/dest()/flag()/long() on
+// an IntOption with Dest set (via the various "-n" test cases), but
+// none of them touch help() or action() when unset, or dest()'s nil
+// branch when Dest itself is left nil.
+func TestIntArgument_Accessors(t *testing.T) {
+	a := &IntArgument{Name: "count", Help: "How many"}
+	if got := a.help(); got != "How many" {
+		t.Errorf("help() = %q, want %q", got, "How many")
+	}
+	if got := a.dest(); got != nil {
+		t.Errorf("dest() = %v, want nil for an unset Dest", got)
+	}
+}
+
+func TestIntOption_Accessors(t *testing.T) {
+	o := &IntOption{Name: "count", Flag: "-n", Help: "How many"}
+	if got := o.name(); got != "count" {
+		t.Errorf("name() = %q, want %q", got, "count")
+	}
+	if got := o.action(); got != nil {
+		t.Errorf("action() = %v, want nil, unset", got)
+	}
+	if got := o.dest(); got != nil {
+		t.Errorf("dest() = %v, want nil for an unset Dest", got)
+	}
+}
+
+// TestBoolOption_Dest_Unset covers BoolOption.dest()'s nil branch --
+// every other BoolOption test case sets Dest.
+func TestBoolOption_Dest_Unset(t *testing.T) {
+	o := &BoolOption{Flag: "-z"}
+	if got := o.dest(); got != nil {
+		t.Errorf("dest() = %v, want nil for an unset Dest", got)
+	}
+}
+
 func TestStdout(t *testing.T) {
 	tests := []struct {
 		input io.Writer
@@ -357,7 +395,7 @@ func TestOptions(t *testing.T) {
 	// not identity, so any non-nil func here works.
 	anyAction := func(*Command, Option, string) *Error { return nil }
 	var discard bool
-	anyDest := BoolVar(&discard)
+	anyDest := &discard
 
 	tests := []struct {
 		name string
@@ -564,7 +602,7 @@ func TestOptions(t *testing.T) {
 func TestOptions_StopsEarly(t *testing.T) {
 	anyAction := func(*Command, Option, string) *Error { return nil }
 	var discard bool
-	anyDest := BoolVar(&discard)
+	anyDest := &discard
 
 	cmd := Command{
 		Name:    "myprogram",
@@ -644,13 +682,6 @@ func TestOptions_StopsEarly(t *testing.T) {
 }
 
 func TestAllEnvVars(t *testing.T) {
-	// Shared Value instances for the Dest-forwarding case below: the
-	// same *stringValue pointer must appear on both the Argument/Option
-	// side and the "want" side for slices.Equal's interface comparison
-	// to hold.
-	var qux, bar string
-	destQux, destBar := StringVar(&qux), StringVar(&bar)
-
 	tests := []struct {
 		name string
 		cmd  Command
@@ -672,7 +703,7 @@ func TestAllEnvVars(t *testing.T) {
 				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
 			},
 			want: []EnvVar{
-				{Name: "PROGRAM_QUX", Help: "The qux to operate on"},
+				{Name: "PROGRAM_QUX", Help: "The qux to operate on", Default: ""},
 			},
 		},
 		{
@@ -682,7 +713,7 @@ func TestAllEnvVars(t *testing.T) {
 				Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
 			},
 			want: []EnvVar{
-				{Name: "PROGRAM_BAR", Help: "Set the bar value"},
+				{Name: "PROGRAM_BAR", Help: "Set the bar value", Default: ""},
 			},
 		},
 		{
@@ -694,8 +725,8 @@ func TestAllEnvVars(t *testing.T) {
 				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 			},
 			want: []EnvVar{
-				{Name: "APP_QUX", Help: "The qux to operate on"},
-				{Name: "APP_BAR", Help: "Set the bar value"},
+				{Name: "APP_QUX", Help: "The qux to operate on", Default: ""},
+				{Name: "APP_BAR", Help: "Set the bar value", Default: ""},
 			},
 		},
 		{
@@ -712,8 +743,8 @@ func TestAllEnvVars(t *testing.T) {
 				},
 			},
 			want: []EnvVar{
-				{Name: "APP_QUX", Help: "The qux to operate on"},
-				{Name: "APP_BAR", Help: "Set the bar value"},
+				{Name: "APP_QUX", Help: "The qux to operate on", Default: ""},
+				{Name: "APP_BAR", Help: "Set the bar value", Default: ""},
 			},
 		},
 		{
@@ -737,29 +768,9 @@ func TestAllEnvVars(t *testing.T) {
 				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
 			want: []EnvVar{
-				{Name: "APP_QUX", Help: "The qux to operate on"},
-				{Name: "APP_BAR", Help: "Set the bar value"},
+				{Name: "APP_QUX", Help: "The qux to operate on", Default: ""},
+				{Name: "APP_BAR", Help: "Set the bar value", Default: ""},
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
-			},
-		},
-		{
-			// Regression guard: allEnvVars must forward Dest and
-			// Default too, not just Name/Help -- Parse's Default ->
-			// Env resolution phase walks this exact same sequence and
-			// needs both to actually apply values.
-			name: "Dest and Default are forwarded from both Argument and Option",
-			cmd: Command{
-				Name: "myprogram",
-				Arguments: []Argument{
-					&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX", Dest: destQux, Default: "fallback-qux"},
-				},
-				Options: []Option{
-					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR", Dest: destBar, Default: "fallback-bar"},
-				},
-			},
-			want: []EnvVar{
-				{Name: "APP_QUX", Help: "The qux to operate on", Dest: destQux, Default: "fallback-qux"},
-				{Name: "APP_BAR", Help: "Set the bar value", Dest: destBar, Default: "fallback-bar"},
 			},
 		},
 	}
@@ -772,6 +783,43 @@ func TestAllEnvVars(t *testing.T) {
 			}
 		})
 	}
+
+	// Regression guard: allEnvVars must forward Dest and Default too,
+	// not just Name/Help -- Parse's Default -> Env resolution phase
+	// walks this exact same sequence and needs both to actually apply
+	// values. A separate subtest, not a table case above: dest()
+	// synthesizes a fresh Value wrapper on every call (see
+	// StringArgument.dest's doc comment), so slices.Equal can no longer
+	// compare Dest by identity -- this checks the effect instead (Set
+	// writes through to the original variable).
+	t.Run("Dest and Default are forwarded from both Argument and Option", func(t *testing.T) {
+		var qux, bar string
+		cmd := Command{
+			Name: "myprogram",
+			Arguments: []Argument{
+				&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX", Dest: &qux, Default: "fallback-qux"},
+			},
+			Options: []Option{
+				&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR", Dest: &bar, Default: "fallback-bar"},
+			},
+		}
+
+		got := slices.Collect(cmd.allEnvVars())
+		if len(got) != 2 {
+			t.Fatalf("allEnvVars() yielded %d entries, want 2", len(got))
+		}
+		if got[0].Default != "fallback-qux" || got[1].Default != "fallback-bar" {
+			t.Errorf("Default not forwarded: got %+v", got)
+		}
+		if got[0].Dest == nil || got[1].Dest == nil {
+			t.Fatalf("Dest not forwarded: got %+v", got)
+		}
+		got[0].Dest.Set("via-qux")
+		got[1].Dest.Set("via-bar")
+		if qux != "via-qux" || bar != "via-bar" {
+			t.Errorf("Dest doesn't write through to the original variable: qux=%q, bar=%q", qux, bar)
+		}
+	})
 }
 
 // TestAllEnvVars_StopsEarly covers all three early-exit points in
@@ -829,15 +877,40 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 // Argument/Option/EnvVar produces a (Dest, Default) pair even when
 // both are nil -- so the cases here cover that alongside the
 // Arguments-then-Options-then-EnvVars order.
+// destPtr extracts the underlying bound pointer from a Value built by
+// this package's own StringVar/BoolVar/IntVar, or synthesized by a
+// typed Argument/Option's dest() accessor (which wraps the same
+// concrete types around its own *string/*bool/*int Dest field) -- as
+// an any, so tests can compare Value instances by the variable they're
+// bound to instead of by object identity: dest() synthesizes a fresh
+// wrapper on every call (see StringArgument.dest's doc comment), so two
+// Values wrapping the same pointer are no longer == to each other.
+func destPtr(v Value) any {
+	switch vv := v.(type) {
+	case *stringValue:
+		return vv.v
+	case *boolValue:
+		return vv.v
+	case *intValue:
+		return vv.v
+	default:
+		return v
+	}
+}
+
 func TestAllDefaults(t *testing.T) {
 	type pair struct {
-		Dest    Value
+		Dest    any
 		Default any
 	}
 	collect := func(c Command) []pair {
 		var got []pair
 		c.allDefaults()(func(dest Value, def any) bool {
-			got = append(got, pair{dest, def})
+			var destAny any
+			if dest != nil {
+				destAny = destPtr(dest)
+			}
+			got = append(got, pair{destAny, def})
 			return true
 		})
 		return got
@@ -849,13 +922,16 @@ func TestAllDefaults(t *testing.T) {
 		}
 	})
 
-	t.Run("items with no Default are still yielded, as a nil pair", func(t *testing.T) {
+	t.Run("items with no Default are still yielded, with a zero-value Default", func(t *testing.T) {
+		// Unlike the old any-typed Default, a typed Default (string,
+		// bool, ...) has no separate "unset" state -- its zero value
+		// is what an unset field yields, same as Dest being nil.
 		c := Command{
 			Name:      "myprogram",
 			Arguments: []Argument{&StringArgument{Name: "qux"}},
 			Options:   []Option{&StringOption{Flag: "-f"}},
 		}
-		want := []pair{{nil, nil}, {nil, nil}}
+		want := []pair{{nil, ""}, {nil, ""}}
 		if got := collect(c); !slices.Equal(got, want) {
 			t.Errorf("allDefaults() = %+v, want %+v", got, want)
 		}
@@ -864,10 +940,9 @@ func TestAllDefaults(t *testing.T) {
 	t.Run("Default set on an Option with no Env at all -- regression guard", func(t *testing.T) {
 		// A Default applies regardless of Env; unlike allEnvVars(),
 		// allDefaults() must not filter on it.
-		var i int
-		dest := IntVar(&i)
-		c := Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-n", Dest: dest, Default: 7}}}
-		want := []pair{{dest, 7}}
+		var s string
+		c := Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-n", Dest: &s, Default: "7"}}}
+		want := []pair{{&s, "7"}}
 		if got := collect(c); !slices.Equal(got, want) {
 			t.Errorf("allDefaults() = %+v, want %+v", got, want)
 		}
@@ -875,17 +950,16 @@ func TestAllDefaults(t *testing.T) {
 
 	t.Run("Arguments, then Options, then EnvVars, in that order", func(t *testing.T) {
 		var qux, bar, debug string
-		destQux, destBar, destDebug := StringVar(&qux), StringVar(&bar), StringVar(&debug)
 		c := Command{
 			Name:      "myprogram",
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: destQux, Default: "fallback-qux"}},
-			Options:   []Option{&StringOption{Flag: "-b", Dest: destBar, Default: "fallback-bar"}},
-			EnvVars:   []EnvVar{{Name: "APP_DEBUG", Dest: destDebug, Default: "fallback-debug"}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux, Default: "fallback-qux"}},
+			Options:   []Option{&StringOption{Flag: "-b", Dest: &bar, Default: "fallback-bar"}},
+			EnvVars:   []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&debug), Default: "fallback-debug"}},
 		}
 		want := []pair{
-			{destQux, "fallback-qux"},
-			{destBar, "fallback-bar"},
-			{destDebug, "fallback-debug"},
+			{&qux, "fallback-qux"},
+			{&bar, "fallback-bar"},
+			{&debug, "fallback-debug"},
 		}
 		if got := collect(c); !slices.Equal(got, want) {
 			t.Errorf("allDefaults() = %+v, want %+v", got, want)
@@ -900,8 +974,8 @@ func TestAllDefaults_StopsEarly(t *testing.T) {
 	var a, b, e string
 	cmd := Command{
 		Name:      "myprogram",
-		Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&a), Default: "a"}},
-		Options:   []Option{&StringOption{Flag: "-b", Dest: StringVar(&b), Default: "b"}},
+		Arguments: []Argument{&StringArgument{Name: "qux", Dest: &a, Default: "a"}},
+		Options:   []Option{&StringOption{Flag: "-b", Dest: &b, Default: "b"}},
 		EnvVars:   []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&e), Default: "e"}},
 	}
 
@@ -1060,7 +1134,7 @@ func TestValidateArguments(t *testing.T) {
 		},
 		{
 			name: "valid, one argument",
-			args: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&s)}},
+			args: []Argument{&StringArgument{Name: "qux", Dest: &s}},
 		},
 		{
 			name:    "empty Argument.Name",
@@ -1072,19 +1146,6 @@ func TestValidateArguments(t *testing.T) {
 			args: []Argument{
 				&StringArgument{Name: "qux"},
 				&StringArgument{Name: "qux"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Default matches Dest type",
-			args: []Argument{
-				&StringArgument{Name: "qux", Dest: StringVar(&s), Default: "bar"},
-			},
-		},
-		{
-			name: "Default mismatches Dest type",
-			args: []Argument{
-				&StringArgument{Name: "qux", Dest: StringVar(&s), Default: 42},
 			},
 			wantErr: true,
 		},
@@ -1132,7 +1193,7 @@ func TestValidateOptions(t *testing.T) {
 		},
 		{
 			name: "valid, option with both Dest and Action",
-			opts: []Option{&StringOption{Flag: "f", Dest: StringVar(&s), Action: func(*Command, Option, string) *Error { return nil }}},
+			opts: []Option{&StringOption{Flag: "f", Dest: &s, Action: func(*Command, Option, string) *Error { return nil }}},
 		},
 		{
 			name:    "option missing both Flag and Long",
@@ -1170,19 +1231,6 @@ func TestValidateOptions(t *testing.T) {
 			opts: []Option{
 				&StringOption{Long: "bar"},
 				&StringOption{Long: "--bar"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Default matches Dest type",
-			opts: []Option{
-				&StringOption{Flag: "f", Dest: StringVar(&s), Default: "bar"},
-			},
-		},
-		{
-			name: "Default mismatches Dest type",
-			opts: []Option{
-				&StringOption{Flag: "f", Dest: StringVar(&s), Default: 42},
 			},
 			wantErr: true,
 		},
@@ -1363,7 +1411,7 @@ func TestParse(t *testing.T) {
 		var s string
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&s)}},
+			Options: []Option{&StringOption{Flag: "-b", Dest: &s}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1378,7 +1426,7 @@ func TestParse(t *testing.T) {
 		var s string
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{&StringOption{Flag: "-b", Env: "APP_BAR", Dest: StringVar(&s), Default: "fallback"}},
+			Options: []Option{&StringOption{Flag: "-b", Env: "APP_BAR", Dest: &s, Default: "fallback"}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1394,7 +1442,7 @@ func TestParse(t *testing.T) {
 		t.Setenv("APP_QUX", "from-env")
 		c := &Command{
 			Name:      "myprogram",
-			Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s), Default: "fallback"}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX", Dest: &s, Default: "fallback"}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1410,7 +1458,7 @@ func TestParse(t *testing.T) {
 		t.Setenv("APP_NUM", "42")
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i), Default: 7}},
+			Options: []Option{&IntOption{Flag: "-n", Env: "APP_NUM", Dest: &i, Default: 7}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -1440,11 +1488,13 @@ func TestParse(t *testing.T) {
 	t.Run("applyDefaults failure propagates: a code-1 *Error, nothing printed", func(t *testing.T) {
 		// validateDefaultType can't check a custom Value's Default (see
 		// its doc comment), so Validate() lets this through and
-		// applyDefaults is the one that has to reject it.
+		// applyDefaults is the one that has to reject it. A custom
+		// Value can only be plugged in via a standalone EnvVar now --
+		// a typed Option's Dest is a native pointer, not a Value.
 		var buf bytes.Buffer
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{&StringOption{Flag: "-x", Dest: failingValue{}, Default: "anything"}},
+			EnvVars: []EnvVar{{Name: "APP_X", Dest: failingValue{}, Default: "anything"}},
 			Stderr:  &buf,
 		}
 
@@ -1466,7 +1516,7 @@ func TestParse(t *testing.T) {
 		t.Setenv("APP_NUM", "not-a-number")
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
+			Options: []Option{&IntOption{Flag: "-n", Env: "APP_NUM", Dest: &i}},
 			Stderr:  &buf,
 		}
 
@@ -1528,7 +1578,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Options: []Option{&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Custom help",
 				// A boolean Dest keeps the Option from consuming a value.
-				Dest: BoolVar(&custom),
+				Dest: &custom,
 				Action: func(c *Command, opt Option, value string) *Error {
 					ran = true
 					return nil
@@ -1568,7 +1618,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name:    "myprogram",
 			Version: "0.1.0",
 			Stdout:  &buf,
-			Options: []Option{&BoolOption{Flag: "-v", Long: "--verbose", Help: "Verbose", Dest: BoolVar(&verbose)}},
+			Options: []Option{&BoolOption{Flag: "-v", Long: "--verbose", Help: "Verbose", Dest: &verbose}},
 		}
 
 		if err := c.Parse([]string{"-v"}); err != nil {
@@ -1598,8 +1648,8 @@ func TestParse_TokenLoop(t *testing.T) {
 			Version: "0.1.0",
 			Stdout:  &buf,
 			Options: []Option{
-				&BoolOption{Flag: "-v", Long: "--verbose", Dest: BoolVar(&v1)},
-				&BoolOption{Flag: "-V", Long: "--vv", Dest: BoolVar(&v2)},
+				&BoolOption{Flag: "-v", Long: "--verbose", Dest: &v1},
+				&BoolOption{Flag: "-V", Long: "--vv", Dest: &v2},
 			},
 		}
 
@@ -1645,8 +1695,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{&BoolOption{Flag: "-f", Dest: BoolVar(&foo)}},
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&BoolOption{Flag: "-f", Dest: &foo}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux}},
 		}
 
 		if err := c.Parse([]string{"-f", "hello"}); err != nil {
@@ -1662,7 +1712,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("value-taking option consumes the next token", func(t *testing.T) {
 		var bar string
-		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}}}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Dest: &bar}}}
 
 		if err := c.Parse([]string{"--bar", "value"}); err != nil {
 			t.Fatalf("Parse() = %v, want nil", err)
@@ -1675,7 +1725,7 @@ func TestParse_TokenLoop(t *testing.T) {
 	t.Run("value-taking option missing its value", func(t *testing.T) {
 		var bar string
 		var buf bytes.Buffer
-		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&bar)}}, Stderr: &buf}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Dest: &bar}}, Stderr: &buf}
 
 		err := c.Parse([]string{"-b"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1688,7 +1738,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("value-taking option, invalid value", func(t *testing.T) {
 		var n int
-		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-n", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
+		c := &Command{Name: "myprogram", Options: []Option{&IntOption{Flag: "-n", Dest: &n}}, Stderr: &bytes.Buffer{}}
 
 		err := c.Parse([]string{"-n", "not-a-number"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1703,8 +1753,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var bar, qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Dest: StringVar(&bar)}},
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Dest: &bar}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux}},
 		}
 
 		if err := c.Parse([]string{"--bar=value", "hello"}); err != nil {
@@ -1722,8 +1772,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var bar, qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{&StringOption{Long: "--bar", Dest: StringVar(&bar)}},
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&StringOption{Long: "--bar", Dest: &bar}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux}},
 		}
 
 		if err := c.Parse([]string{"--bar=", "hello"}); err != nil {
@@ -1739,7 +1789,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("--bar=a=b splits only on the first =", func(t *testing.T) {
 		var bar string
-		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Long: "--bar", Dest: StringVar(&bar)}}}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Long: "--bar", Dest: &bar}}}
 
 		if err := c.Parse([]string{"--bar=a=b"}); err != nil {
 			t.Fatalf("Parse() = %v, want nil", err)
@@ -1751,7 +1801,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("--flag=false overrides a boolean Dest's bare-presence true", func(t *testing.T) {
 		var verbose bool
-		c := &Command{Name: "myprogram", Options: []Option{&BoolOption{Long: "--verbose", Dest: BoolVar(&verbose)}}}
+		c := &Command{Name: "myprogram", Options: []Option{&BoolOption{Long: "--verbose", Dest: &verbose}}}
 
 		if err := c.Parse([]string{"--verbose=false"}); err != nil {
 			t.Fatalf("Parse() = %v, want nil", err)
@@ -1764,7 +1814,7 @@ func TestParse_TokenLoop(t *testing.T) {
 	t.Run(`-b=value is not split -- "=" merging is long-form only`, func(t *testing.T) {
 		var b string
 		var buf bytes.Buffer
-		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&b)}}, Stderr: &buf}
+		c := &Command{Name: "myprogram", Options: []Option{&StringOption{Flag: "-b", Dest: &b}}, Stderr: &buf}
 
 		err := c.Parse([]string{"-b=value"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1793,8 +1843,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Arguments: []Argument{
-				&StringArgument{Name: "first", Dest: StringVar(&a)},
-				&StringArgument{Name: "second", Dest: StringVar(&b)},
+				&StringArgument{Name: "first", Dest: &a},
+				&StringArgument{Name: "second", Dest: &b},
 			},
 		}
 
@@ -1820,7 +1870,7 @@ func TestParse_TokenLoop(t *testing.T) {
 
 	t.Run("positional argument, invalid value", func(t *testing.T) {
 		var n int
-		c := &Command{Name: "myprogram", Arguments: []Argument{&StringArgument{Name: "num", Dest: IntVar(&n)}}, Stderr: &bytes.Buffer{}}
+		c := &Command{Name: "myprogram", Arguments: []Argument{&IntArgument{Name: "num", Dest: &n}}, Stderr: &bytes.Buffer{}}
 
 		err := c.Parse([]string{"not-a-number"})
 		if err == nil || err.ExitCode() != 2 {
@@ -1844,8 +1894,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var qux string
 		c := &Command{
 			Name:      "myprogram",
-			Options:   []Option{&BoolOption{Flag: "-f", Dest: BoolVar(&foo)}},
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
+			Options:   []Option{&BoolOption{Flag: "-f", Dest: &foo}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux}},
 		}
 
 		if err := c.Parse([]string{"-f", "hello"}); err != nil {
@@ -1898,7 +1948,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Options: []Option{
 				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { ran = true; seenValue = value; return nil }},
 			},
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux}},
 		}
 
 		if err := c.Parse([]string{"-x", "consumed", "hello"}); err != nil {
@@ -1922,7 +1972,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name: "myprogram",
 			Options: []Option{
 				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { return newError(2, "%s", sentinel) }},
-				&BoolOption{Flag: "-y", Dest: BoolVar(&later)},
+				&BoolOption{Flag: "-y", Dest: &later},
 			},
 		}
 
@@ -1944,7 +1994,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{&StringOption{
-				Flag: "-b", Dest: StringVar(&bar),
+				Flag: "-b", Dest: &bar,
 				Action: func(c *Command, opt Option, value string) *Error {
 					seenViaAction = value
 					return nil
@@ -1969,7 +2019,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{&BoolOption{
-				Flag: "-f", Dest: BoolVar(&foo),
+				Flag: "-f", Dest: &foo,
 				Action: func(c *Command, opt Option, value string) *Error {
 					seenViaAction = value
 					return nil
@@ -2017,13 +2067,13 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name: "myprogram",
 			Options: []Option{&BoolOption{
 				Flag: "-x",
-				Dest: BoolVar(&triggered),
+				Dest: &triggered,
 				Action: func(c *Command, opt Option, value string) *Error {
 					seenValue = value
 					return nil
 				},
 			}},
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&qux)}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux}},
 		}
 
 		if err := c.Parse([]string{"-x", "hello"}); err != nil {
@@ -2045,8 +2095,8 @@ func TestParse_TokenLoop(t *testing.T) {
 		var ran bool
 		c := &Command{
 			Name: "myprogram",
-			Options: []Option{&StringOption{
-				Flag: "-n", Dest: IntVar(&n),
+			Options: []Option{&IntOption{
+				Flag: "-n", Dest: &n,
 				Action: func(c *Command, opt Option, value string) *Error { ran = true; return nil },
 			}},
 			Stderr: &bytes.Buffer{},
@@ -2072,8 +2122,8 @@ func TestApplyDefaults(t *testing.T) {
 		var i int
 		c := &Command{
 			Name:      "myprogram",
-			Arguments: []Argument{&StringArgument{Name: "qux", Dest: StringVar(&s), Default: "fallback"}},
-			Options:   []Option{&StringOption{Flag: "-n", Dest: IntVar(&i), Default: 7}},
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &s, Default: "fallback"}},
+			Options:   []Option{&IntOption{Flag: "-n", Dest: &i, Default: 7}},
 		}
 
 		if err := c.applyDefaults(); err != nil {
@@ -2096,11 +2146,18 @@ func TestApplyDefaults(t *testing.T) {
 	})
 
 	t.Run("Set failure: a code-1 *Error, nothing printed", func(t *testing.T) {
+		// A typed Argument/Option's Default can never mismatch its
+		// Dest (compiler-enforced), so the only way left to trigger
+		// applyDefaults' Set-failure branch is a standalone EnvVar --
+		// its Dest/Default pair is still untyped (Value/any). This
+		// would normally be caught by Validate first; applyDefaults is
+		// exercised directly here, bypassing Validate, same as the
+		// other subtests in this test.
 		var buf bytes.Buffer
 		var i int
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{&StringOption{Flag: "-n", Dest: IntVar(&i), Default: "not-a-number"}},
+			EnvVars: []EnvVar{{Name: "APP_NUM", Dest: IntVar(&i), Default: "not-a-number"}},
 			Stderr:  &buf,
 		}
 
@@ -2123,7 +2180,7 @@ func TestApplyDefaults(t *testing.T) {
 func TestApplyEnvVars(t *testing.T) {
 	t.Run("no Env declared: Dest untouched", func(t *testing.T) {
 		var s string
-		c := &Command{Options: []Option{&StringOption{Flag: "-b", Dest: StringVar(&s)}}}
+		c := &Command{Options: []Option{&StringOption{Flag: "-b", Dest: &s}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2159,7 +2216,7 @@ func TestApplyEnvVars(t *testing.T) {
 
 	t.Run("Env declared but absent from the environment: Dest untouched", func(t *testing.T) {
 		var s string
-		c := &Command{Options: []Option{&StringOption{Flag: "-b", Env: "APP_DOES_NOT_EXIST", Dest: StringVar(&s)}}}
+		c := &Command{Options: []Option{&StringOption{Flag: "-b", Env: "APP_DOES_NOT_EXIST", Dest: &s}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2172,7 +2229,7 @@ func TestApplyEnvVars(t *testing.T) {
 	t.Run("env present overrides Dest, for an Argument", func(t *testing.T) {
 		var s string
 		t.Setenv("APP_QUX", "from-env")
-		c := &Command{Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX", Dest: StringVar(&s)}}}
+		c := &Command{Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX", Dest: &s}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2185,7 +2242,7 @@ func TestApplyEnvVars(t *testing.T) {
 	t.Run("env present overrides Dest, for an Option", func(t *testing.T) {
 		var i int
 		t.Setenv("APP_NUM", "42")
-		c := &Command{Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}}}
+		c := &Command{Options: []Option{&IntOption{Flag: "-n", Env: "APP_NUM", Dest: &i}}}
 
 		if err := c.applyEnvVars(); err != nil {
 			t.Errorf("applyEnvVars() = %v, want nil", err)
@@ -2214,7 +2271,7 @@ func TestApplyEnvVars(t *testing.T) {
 		t.Setenv("APP_NUM", "not-a-number")
 		c := &Command{
 			Name:    "myprogram",
-			Options: []Option{&StringOption{Flag: "-n", Env: "APP_NUM", Dest: IntVar(&i)}},
+			Options: []Option{&IntOption{Flag: "-n", Env: "APP_NUM", Dest: &i}},
 			Stderr:  &buf,
 		}
 

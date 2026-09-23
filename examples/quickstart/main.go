@@ -29,22 +29,22 @@ func main() {
 			&cli.StringArgument{
 				// A positional argument: no Flag/Long, just a Name and a Dest.
 				Name: "qux", Help: "The qux to operate on",
-				Dest: cli.StringVar(&cfg.Qux),
+				Dest: &cfg.Qux,
 			},
 		},
 		Options: []cli.Option{
 			&cli.BoolOption{
 				// A boolean flag: presence sets it true, absence leaves the
 				// zero value (false).
-				Flag: "-f", Long: "--foo", Help: "Enable foo mode",
-				Dest: cli.BoolVar(&cfg.Foo),
+				Flag: "-f", Long: "--foo",
+				Help: "Enable foo mode", Dest: &cfg.Foo,
 			},
 			&cli.StringOption{
 				// Precedence chain for a value that can come from several
 				// places: an explicit -b/--bar flag wins over the
 				// PROGRAM_BAR environment variable, which wins over Default.
-				Flag: "-b", Long: "--bar", Help: "Set the bar value",
-				Dest: cli.StringVar(&cfg.Bar), Default: "default-bar", Env: "PROGRAM_BAR",
+				Flag: "-b", Long: "--bar", Default: "default-bar", Env: "PROGRAM_BAR",
+				Help: "Set the bar value", Dest: &cfg.Bar,
 			},
 		},
 	}
