@@ -14,8 +14,6 @@ import (
 	"strings"
 )
 
-// --- Command -----------------------------------------------------------------
-
 // Command describes a complete command-line interface: its identity
 // (Name/Version/Description), its positional Arguments, and its Options
 // (flags). A Command is plain data — build it as a struct literal, then

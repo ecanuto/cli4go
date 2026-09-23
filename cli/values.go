@@ -25,8 +25,6 @@ type Value interface {
 	Set(s string) error
 }
 
-// --- Value implementations ---------------------------------------------------
-
 type stringValue struct{ v *string }
 
 // StringVar binds a string flag or argument to v.

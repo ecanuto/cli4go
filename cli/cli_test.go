@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// --- Argument, Option, EnvVar, Command ---------------------------------------
-
 // TestSet covers every typed Argument/Option's set: it converts the
 // string into Dest's Go type, returns the conversion error unchanged
 // for a bad one (leaving Dest as it was), and does nothing at all --
