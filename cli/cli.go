@@ -18,13 +18,13 @@ import (
 // Value is implemented by anything that can be set from a single
 // command-line token. cli4go ships implementations for common types
 // (see StringVar, BoolVar, IntVar). The typed Argument/Option family
-// (StringArgument, StringOption, BoolOption, IntOption, ...) binds Dest
-// directly to a native pointer (e.g. *string) and reuses these same
-// concrete implementations internally, without going through StringVar/
-// BoolVar/IntVar themselves (see e.g. StringArgument.dest's doc
-// comment) -- those constructors remain the public way to bind a
-// standalone EnvVar's Dest, which has no typed family of its own, or to
-// bind a custom Value implementation there.
+// (StringArgument, StringOption, BoolOption, IntOption, ...) does not
+// use Value at all: it binds Dest directly to a native pointer (e.g.
+// *string) and converts strings through its own set method, sharing
+// only the parseInt/parseBool helpers below with these implementations.
+// Value remains the way to bind a standalone EnvVar's Dest, which has
+// no typed family of its own, or to bind a custom implementation
+// there.
 type Value interface {
 	// String returns the current value, formatted for display (used in
 	// generated help text, e.g. when rendering defaults).
@@ -67,9 +67,9 @@ func (i *intValue) String() string {
 }
 
 func (i *intValue) Set(val string) error {
-	parsed, err := strconv.Atoi(val)
+	parsed, err := parseInt(val)
 	if err != nil {
-		return fmt.Errorf("invalid integer value %q: %w", val, err)
+		return err
 	}
 	*i.v = parsed
 	return nil
@@ -89,12 +89,31 @@ func (b *boolValue) String() string {
 }
 
 func (b *boolValue) Set(val string) error {
-	parsed, err := strconv.ParseBool(val)
+	parsed, err := parseBool(val)
 	if err != nil {
-		return fmt.Errorf("invalid boolean value %q: %w", val, err)
+		return err
 	}
 	*b.v = parsed
 	return nil
+}
+
+// parseInt and parseBool are the string -> Go value conversions shared
+// by the Value implementations above and the typed Argument/Option
+// family's set methods, so the error messages live in one place.
+func parseInt(s string) (int, error) {
+	n, err := strconv.Atoi(s)
+	if err != nil {
+		return 0, fmt.Errorf("invalid integer value %q: %w", s, err)
+	}
+	return n, nil
+}
+
+func parseBool(s string) (bool, error) {
+	b, err := strconv.ParseBool(s)
+	if err != nil {
+		return false, fmt.Errorf("invalid boolean value %q: %w", s, err)
+	}
+	return b, nil
 }
 
 // --- Errors ------------------------------------------------------------------
@@ -134,7 +153,7 @@ func (e *Error) Error() string { return e.msg }
 //	     can't actually be assigned to it, ...) -- a bug in the
 //	     caller's Go code, not something the end user mistyped on the
 //	     command line. Most often from Validate(), but also from
-//	     Parse's own applyDefaults step (see its doc comment).
+//	     Parse's Default resolution (see resolveEnvVar's doc comment).
 //	2 -- a real parsing/usage error (unknown option, missing value,
 //	     invalid value, unexpected positional argument, a bad Env
 //	     value) -- matches the getopt/argparse convention of using 2
@@ -192,8 +211,18 @@ type Argument interface {
 	name() string
 	help() string
 	env() string
-	dest() Value
-	defaultValue() any
+
+	// set parses s into Dest, the token Parse (or an Env lookup) just
+	// resolved for this Argument. It returns whatever conversion error
+	// the concrete type produces (none for a string), and does nothing
+	// -- returning nil -- when Dest is unset.
+	set(s string) error
+
+	// setDefault assigns Default to Dest directly, when Dest is set --
+	// no string round trip, and it can never fail, since Default and
+	// Dest are the same Go type. The zero value applies too, like any
+	// other Default (see StringArgument's Default doc comment).
+	setDefault()
 }
 
 // StringArgument describes a single string-typed positional argument --
@@ -230,17 +259,18 @@ func (a *StringArgument) name() string { return a.Name }
 func (a *StringArgument) help() string { return a.Help }
 func (a *StringArgument) env() string  { return a.Env }
 
-// dest wraps Dest in a Value only here, at the point Parse/applyDefaults/
-// applyEnvVars actually need one -- Dest itself stays a plain *string, so
-// a struct literal never has to build one (see Value's doc comment).
-func (a *StringArgument) dest() Value {
-	if a.Dest == nil {
-		return nil
+func (a *StringArgument) set(s string) error {
+	if a.Dest != nil {
+		*a.Dest = s
 	}
-	return &stringValue{v: a.Dest}
+	return nil
 }
 
-func (a *StringArgument) defaultValue() any { return a.Default }
+func (a *StringArgument) setDefault() {
+	if a.Dest != nil {
+		*a.Dest = a.Default
+	}
+}
 
 // IntArgument describes a single int-typed positional argument -- the
 // Argument implementation for a value that must parse as a Go int
@@ -268,15 +298,23 @@ func (a *IntArgument) name() string { return a.Name }
 func (a *IntArgument) help() string { return a.Help }
 func (a *IntArgument) env() string  { return a.Env }
 
-// dest -- see StringArgument.dest's doc comment; same reasoning here.
-func (a *IntArgument) dest() Value {
+func (a *IntArgument) set(s string) error {
 	if a.Dest == nil {
 		return nil
 	}
-	return &intValue{v: a.Dest}
+	n, err := parseInt(s)
+	if err != nil {
+		return err
+	}
+	*a.Dest = n
+	return nil
 }
 
-func (a *IntArgument) defaultValue() any { return a.Default }
+func (a *IntArgument) setDefault() {
+	if a.Dest != nil {
+		*a.Dest = a.Default
+	}
+}
 
 // Option describes a single flag (e.g. "-f, --foo"). Unlike Argument, the
 // order of Options in Command.Options has no effect on parsing: flags can
@@ -298,8 +336,8 @@ type Option interface {
 	name() string
 	help() string
 	env() string
-	dest() Value
-	defaultValue() any
+	set(s string) error // see Argument.set
+	setDefault()        // see Argument.setDefault
 	flag() string
 	long() string
 	action() Action
@@ -319,6 +357,23 @@ func normalizeDashes(s string, dashes int) string {
 		return s
 	}
 	return strings.Repeat("-", dashes) + strings.TrimLeft(s, "-")
+}
+
+// optionName returns the identifier of an Option: name when set,
+// otherwise long without its leading "--", otherwise flag without its
+// leading "-". flag and long are expected in normalized form (see
+// normalizeDashes). validateOptions guarantees at least one of the two
+// is set, so the result is never empty for a validated Option. Shared
+// by every Option implementation's name() method.
+func optionName(name, flag, long string) string {
+	switch {
+	case name != "":
+		return name
+	case long != "":
+		return strings.TrimPrefix(long, "--")
+	default:
+		return strings.TrimPrefix(flag, "-")
+	}
 }
 
 // StringOption describes a single string-typed flag -- the Option
@@ -385,22 +440,26 @@ type StringOption struct {
 	Action Action
 }
 
-func (o *StringOption) name() string { return o.Name }
+func (o *StringOption) name() string { return optionName(o.Name, o.flag(), o.long()) }
 func (o *StringOption) help() string { return o.Help }
 func (o *StringOption) env() string  { return o.Env }
 
-// dest -- see StringArgument.dest's doc comment; same reasoning here.
-func (o *StringOption) dest() Value {
-	if o.Dest == nil {
-		return nil
+func (o *StringOption) set(s string) error {
+	if o.Dest != nil {
+		*o.Dest = s
 	}
-	return &stringValue{v: o.Dest}
+	return nil
 }
 
-func (o *StringOption) defaultValue() any { return o.Default }
-func (o *StringOption) flag() string      { return normalizeDashes(o.Flag, 1) }
-func (o *StringOption) long() string      { return normalizeDashes(o.Long, 2) }
-func (o *StringOption) action() Action    { return o.Action }
+func (o *StringOption) setDefault() {
+	if o.Dest != nil {
+		*o.Dest = o.Default
+	}
+}
+
+func (o *StringOption) flag() string   { return normalizeDashes(o.Flag, 1) }
+func (o *StringOption) long() string   { return normalizeDashes(o.Long, 2) }
+func (o *StringOption) action() Action { return o.Action }
 
 // IntOption describes a single flag whose value must parse as a Go int
 // (strconv.Atoi) -- the Option implementation for the common case of an
@@ -435,22 +494,31 @@ type IntOption struct {
 	Action Action
 }
 
-func (o *IntOption) name() string { return o.Name }
+func (o *IntOption) name() string { return optionName(o.Name, o.flag(), o.long()) }
 func (o *IntOption) help() string { return o.Help }
 func (o *IntOption) env() string  { return o.Env }
 
-// dest -- see StringArgument.dest's doc comment; same reasoning here.
-func (o *IntOption) dest() Value {
+func (o *IntOption) set(s string) error {
 	if o.Dest == nil {
 		return nil
 	}
-	return &intValue{v: o.Dest}
+	n, err := parseInt(s)
+	if err != nil {
+		return err
+	}
+	*o.Dest = n
+	return nil
 }
 
-func (o *IntOption) defaultValue() any { return o.Default }
-func (o *IntOption) flag() string      { return normalizeDashes(o.Flag, 1) }
-func (o *IntOption) long() string      { return normalizeDashes(o.Long, 2) }
-func (o *IntOption) action() Action    { return o.Action }
+func (o *IntOption) setDefault() {
+	if o.Dest != nil {
+		*o.Dest = o.Default
+	}
+}
+
+func (o *IntOption) flag() string   { return normalizeDashes(o.Flag, 1) }
+func (o *IntOption) long() string   { return normalizeDashes(o.Long, 2) }
+func (o *IntOption) action() Action { return o.Action }
 
 // BoolOption describes a single boolean flag -- one whose mere presence
 // on the command line sets it, never consuming a following token (see
@@ -484,22 +552,31 @@ type BoolOption struct {
 	Action Action
 }
 
-func (o *BoolOption) name() string { return o.Name }
+func (o *BoolOption) name() string { return optionName(o.Name, o.flag(), o.long()) }
 func (o *BoolOption) help() string { return o.Help }
 func (o *BoolOption) env() string  { return o.Env }
 
-// dest -- see StringArgument.dest's doc comment; same reasoning here.
-func (o *BoolOption) dest() Value {
+func (o *BoolOption) set(s string) error {
 	if o.Dest == nil {
 		return nil
 	}
-	return &boolValue{v: o.Dest}
+	b, err := parseBool(s)
+	if err != nil {
+		return err
+	}
+	*o.Dest = b
+	return nil
 }
 
-func (o *BoolOption) defaultValue() any { return o.Default }
-func (o *BoolOption) flag() string      { return normalizeDashes(o.Flag, 1) }
-func (o *BoolOption) long() string      { return normalizeDashes(o.Long, 2) }
-func (o *BoolOption) action() Action    { return o.Action }
+func (o *BoolOption) setDefault() {
+	if o.Dest != nil {
+		*o.Dest = o.Default
+	}
+}
+
+func (o *BoolOption) flag() string   { return normalizeDashes(o.Flag, 1) }
+func (o *BoolOption) long() string   { return normalizeDashes(o.Long, 2) }
+func (o *BoolOption) action() Action { return o.Action }
 
 // Action is a hook that runs when its Option's flag is seen on the
 // command line. Parse calls it as opt.action()(c, opt, value): c is
@@ -510,7 +587,7 @@ func (o *BoolOption) action() Action    { return o.Action }
 // e.g. opt.(*StringOption).Flag, or by calling the small set of
 // unexported accessor methods available to code inside this package),
 // and value is the same string Parse would hand (or just handed) to
-// Dest.Set: the token consumed from the command line by default, or
+// the Option's set method: the token consumed from the command line by default, or
 // "true" for a flag that opts out of consuming one -- see Dest's doc
 // comment and BoolOption's; an Action-only Option (no Dest at all)
 // still consumes a value by default, exactly like any other flag,
@@ -519,7 +596,7 @@ func (o *BoolOption) action() Action    { return o.Action }
 // leave Dest nil and rely on Action alone).
 //
 // An Option may set Dest, Action, both, or neither. When both are set,
-// Dest resolves first -- Action only runs if Dest.Set succeeded, and
+// Dest resolves first -- Action only runs if set succeeded, and
 // sees the exact same value Dest was just given, so it never needs to
 // re-derive or re-parse anything Dest already handled.
 //
@@ -537,7 +614,7 @@ func (o *BoolOption) action() Action    { return o.Action }
 // to return ErrHelp, ErrVersion, or any other *Error (e.g. built with
 // newError) if that's the exit behavior it wants. This is how the
 // built-in -h/--help and -v/--version flags get their behavior (see
-// options): each is a BoolOption with Dest bound to a BoolVar
+// options): each is a BoolOption with Dest bound to a throwaway bool
 // (never consuming a token, value always "true") and Action set to a
 // closure that prints and returns ErrHelp/ErrVersion. A caller-declared
 // Option can set its own Action exactly the same way, with no special
@@ -676,8 +753,8 @@ func (c *Command) options() iter.Seq[Option] {
 		// Parse): an Option with an Action but no Dest otherwise
 		// defaults to consuming a value, and being a *BoolOption is
 		// what says otherwise, built-in or not, independent of Dest.
-		// Each built-in still binds Dest to a plain BoolVar anyway, so
-		// Dest.Set has somewhere to write "true" (Dest resolves before
+		// Each built-in still binds Dest to a throwaway bool anyway, so
+		// set has somewhere to write "true" (Dest resolves before
 		// Action -- see the Action doc comment); discard itself is
 		// never read, since neither built-in has any value of its own
 		// to store.
@@ -755,17 +832,15 @@ func (c *Command) options() iter.Seq[Option] {
 // EnvVars, in that order. The generator stops yielding when yield
 // returns false.
 //
-// Each yielded EnvVar carries its originating Argument/Option's Dest
-// and Default alongside Name/Help -- not just what HelpString needs to
-// render the "Environment Variables:" section, but everything Parse's
-// Default -> Env resolution phase needs too, so Parse can walk this
-// exact same sequence instead of re-deriving it over Arguments/Options
-// on its own.
+// An entry derived from an Argument or Option carries only Name and
+// Help -- all HelpString, its only caller, reads. Its Dest and Default
+// stay on the Argument/Option itself: Parse resolves Env/Default per
+// item (see fromEnv/setDefault) and does not walk this sequence.
 func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 	return func(yield func(EnvVar) bool) {
 		for _, arg := range c.Arguments {
 			if arg.env() != "" {
-				if !yield(EnvVar{Name: arg.env(), Help: arg.help(), Dest: arg.dest(), Default: arg.defaultValue()}) {
+				if !yield(EnvVar{Name: arg.env(), Help: arg.help()}) {
 					return
 				}
 			}
@@ -773,7 +848,7 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 
 		for opt := range c.options() {
 			if opt.env() != "" {
-				if !yield(EnvVar{Name: opt.env(), Help: opt.help(), Dest: opt.dest(), Default: opt.defaultValue()}) {
+				if !yield(EnvVar{Name: opt.env(), Help: opt.help()}) {
 					return
 				}
 			}
@@ -781,41 +856,6 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 
 		for _, env := range c.EnvVars {
 			if !yield(env) {
-				return
-			}
-		}
-	}
-}
-
-// allDefaults returns a generator function that yields the (Dest,
-// Default) pair for every Argument, Option, and standalone EnvVar, in
-// that order -- unconditionally, unlike allEnvVars() (which only
-// yields entries that declare an Env name): a Default applies whether
-// or not the item also has an Env, so this doesn't filter by Env, or
-// even by whether Dest/Default themselves are set -- applyDefaults'
-// own nil checks decide which pairs actually do anything. Options are
-// walked via c.Options directly, NOT options() -- unlike allEnvVars --
-// since a synthesized -h/--help or -v/--version built-in never has a
-// Default of its own (its Dest is always a discard BoolVar), so
-// including it here would only add nil-Default noise for
-// applyDefaults to skip right back over.
-// The generator stops yielding when yield returns false.
-func (c *Command) allDefaults() iter.Seq2[Value, any] {
-	return func(yield func(Value, any) bool) {
-		for _, arg := range c.Arguments {
-			if !yield(arg.dest(), arg.defaultValue()) {
-				return
-			}
-		}
-
-		for _, opt := range c.Options {
-			if !yield(opt.dest(), opt.defaultValue()) {
-				return
-			}
-		}
-
-		for _, env := range c.EnvVars {
-			if !yield(env.Dest, env.Default) {
 				return
 			}
 		}
@@ -844,10 +884,12 @@ func (c *Command) allDefaults() iter.Seq2[Value, any] {
 //     Option set (options() -- user-declared Options plus whichever
 //     built-ins survived suppression), so a partial claim on a
 //     built-in's forms is rejected as a real conflict.
-//  7. Every standalone EnvVar.Name is non-empty.
-//  8. Every environment variable name -- from Arguments' Env, Options'
+//  7. Every Option's name() -- Name, else Long/Flag without its
+//     dashes -- is unique across that same effective set.
+//  8. Every standalone EnvVar.Name is non-empty.
+//  9. Every environment variable name -- from Arguments' Env, Options'
 //     Env, and EnvVars -- is unique across all three.
-//  9. Every standalone EnvVar's Default (if set) type-matches its
+//  10. Every standalone EnvVar's Default (if set) type-matches its
 //     Dest's concrete type -- the one Default/Dest check Validate still
 //     performs at runtime, now that Argument/Option's typed Dest/
 //     Default fields (e.g. StringOption's *string/string pair) are
@@ -924,7 +966,10 @@ func validateArguments(args []Argument) error {
 }
 
 // validateOptions checks opts for structural problems: a missing
-// Flag/Long, or a malformed or duplicate Flag/Long. Same free-function
+// Flag/Long, a malformed or duplicate Flag/Long, or a duplicate name()
+// (Option.Name, or the name derived from Long/Flag when Name is unset
+// -- Parse keys its "set on the command line" bookkeeping by it, so it
+// has to be unique). Same free-function
 // shape as validateArguments, for the same reason -- and the same note
 // applies: no Default/Dest type check here, since a typed Option's
 // Default is already the same Go type as its Dest.
@@ -937,6 +982,7 @@ func validateArguments(args []Argument) error {
 // even present in that effective set.
 func validateOptions(opts []Option) error {
 	seen := make(map[string]bool, len(opts)*2)
+	seenNames := make(map[string]bool, len(opts))
 	for _, opt := range opts {
 		// Compare Flag/Long in their normalized form, so "-f"/"f" or
 		// "--bar"/"bar" on two different Options are correctly treated
@@ -973,6 +1019,15 @@ func validateOptions(opts []Option) error {
 			}
 			seen[long] = true
 		}
+
+		// Checked last so a duplicate Flag/Long is still reported as
+		// such -- e.g. two Options sharing only a Flag would otherwise
+		// also derive the same name and hit this error first.
+		name := opt.name()
+		if seenNames[name] {
+			return fmt.Errorf("cli: duplicate option name %q", name)
+		}
+		seenNames[name] = true
 	}
 	return nil
 }
@@ -1092,8 +1147,8 @@ func validateDefaultType(dest Value, def any) error {
 //     ErrHelp) / errors.Is(err, ErrVersion) to tell which one fired, if
 //     that matters.
 //   - a code-1 failure (ExitCode() == 1): the Command itself was
-//     declared incorrectly -- from Validate() or from Parse's own
-//     applyDefaults step -- see their doc comments. Nothing is
+//     declared incorrectly -- from Validate() or from a Default that
+//     can't be assigned (see resolveEnvVar's doc comment). Nothing is
 //     printed.
 //   - a real parsing/usage error (ExitCode() == 2): an unknown or
 //     invalid option/argument, including a bad Env value, or whatever
@@ -1121,16 +1176,6 @@ func (c *Command) Parse(args []string) *Error {
 		return err
 	}
 
-	// Default -> Env resolution, the Default half.
-	if err := c.applyDefaults(); err != nil {
-		return err
-	}
-
-	// Default -> Env resolution, the Env half.
-	if err := c.applyEnvVars(); err != nil {
-		return err
-	}
-
 	// Lookup map built once so each token below resolves to its Option
 	// in O(1). Built from options(), not c.Options, so the built-in
 	// -h/--help and -v/--version go through the same lookup and
@@ -1147,6 +1192,11 @@ func (c *Command) Parse(args []string) *Error {
 			opts[long] = opt
 		}
 	}
+
+	// Which Arguments/Options the command line itself set, by name():
+	// the resolution phase after the loop only touches the rest.
+	seenArgs := make(map[string]bool, len(c.Arguments))
+	seenOpts := make(map[string]bool, len(c.Options))
 
 	// Classic index loop, not range: consuming a value-taking Option's
 	// value requires advancing i an extra position mid-iteration.
@@ -1172,8 +1222,9 @@ func (c *Command) Parse(args []string) *Error {
 			if !ok {
 				return c.PrintErrorf("unknown option %q", tok)
 			}
+			seenOpts[opt.name()] = true
 
-			// value is what Dest.Set and Action both receive. hasValue
+			// value is what set and Action both receive. hasValue
 			// (an attached "=value") wins over the *BoolOption check
 			// below, so "--flag=false" can override a boolean Dest
 			// explicitly. Otherwise the next token is consumed as the
@@ -1192,12 +1243,9 @@ func (c *Command) Parse(args []string) *Error {
 			}
 
 			// Dest resolves first, if set: Action (below) receives the
-			// exact same value, and only runs at all if Dest.Set
-			// succeeded.
-			if dest := opt.dest(); dest != nil {
-				if setErr := dest.Set(value); setErr != nil {
-					return c.PrintErrorf("option %q: %w", tok, setErr)
-				}
+			// exact same value, and only runs at all if set succeeded.
+			if setErr := opt.set(value); setErr != nil {
+				return c.PrintErrorf("option %q: %w", tok, setErr)
 			}
 
 			// See the Action doc comment for its nil/non-nil contract.
@@ -1215,75 +1263,103 @@ func (c *Command) Parse(args []string) *Error {
 			}
 			arg := c.Arguments[argIndex]
 			argIndex++
+			seenArgs[arg.name()] = true
 
-			dest := arg.dest()
-			if dest == nil {
-				continue
-			}
-			if setErr := dest.Set(tok); setErr != nil {
+			if setErr := arg.set(tok); setErr != nil {
 				return c.PrintErrorf("argument %q: %w", tok, setErr)
 			}
 		}
 	}
 
-	return nil
-}
-
-// applyDefaults assigns each Argument, Option, and standalone EnvVar's
-// Default (if set) to its Dest, via allDefaults() -- the Default half
-// of Default -> Env resolution. Parse always runs applyEnvVars right
-// after (the Env half), so a present environment variable still
-// overrides whatever Default set here.
-//
-// A typed Argument/Option's Default is always the same Go type as its
-// Dest (compiler-enforced), so a Set failure here can only come from a
-// standalone EnvVar with a mismatched Dest/Default -- caught first by
-// validateDefaultType/Validate -- or a custom Value implementation
-// Validate deliberately can't check (see validateDefaultType's doc
-// comment). Either way, that makes it the same kind of problem
-// Validate() itself reports: the Command was declared incorrectly, not
-// something the end user typed -- so, like Validate(), it reports
-// ExitCode() == 1 and prints nothing, unlike a bad command-line or Env
-// value (which goes through PrintErrorf instead).
-func (c *Command) applyDefaults() *Error {
-	for dest, def := range c.allDefaults() {
-		if dest == nil || def == nil {
-			continue
+	// Everything the command line did not set falls back to its Env
+	// variable, else its Default -- Arguments, then Options, then
+	// standalone EnvVars, each in declaration order. Nothing above wrote
+	// a Default or Env value, so a failure in the loop leaves every
+	// untouched Dest exactly as the caller had it.
+	for _, arg := range c.Arguments {
+		if !seenArgs[arg.name()] {
+			found, err := c.fromEnv(arg.env(), arg.set)
+			if err != nil {
+				return err
+			}
+			if !found {
+				arg.setDefault()
+			}
 		}
-		if setErr := dest.Set(fmt.Sprint(def)); setErr != nil {
-			return newError(1, "%s", fmt.Errorf("cli: invalid default value %v: %w", def, setErr))
+	}
+	for _, opt := range c.Options {
+		if !seenOpts[opt.name()] {
+			found, err := c.fromEnv(opt.env(), opt.set)
+			if err != nil {
+				return err
+			}
+			if !found {
+				opt.setDefault()
+			}
+		}
+	}
+	for _, env := range c.EnvVars {
+		if err := c.resolveEnvVar(env.Dest, env.Name, env.Default); err != nil {
+			return err
 		}
 	}
 
 	return nil
 }
 
-// applyEnvVars resolves the Env half of Default -> Env for every
-// Argument, Option, and standalone EnvVar -- in the order allEnvVars()
-// yields them (Arguments, then Options, then EnvVars): when Dest is
-// bound and the named variable is present in the environment, its
-// value overrides whatever Dest already holds (applyDefaults having
-// already run first -- see Parse).
+// fromEnv hands the value of the environment variable name to set, when
+// name is non-empty and the variable is present, reporting whether it
+// was present. An empty or absent name just reports false.
 //
-// A bad value is a real parsing/usage error (ExitCode() == 2),
+// A bad Env value is a real parsing/usage error (ExitCode() == 2),
 // already printed via PrintErrorf by the time this returns it, so
 // Parse can return it as-is.
-func (c *Command) applyEnvVars() *Error {
-	for env := range c.allEnvVars() {
-		if env.Name == "" || env.Dest == nil {
-			continue
-		}
-
-		val, ok := os.LookupEnv(env.Name)
-		if !ok {
-			continue
-		}
-
-		if setErr := env.Dest.Set(val); setErr != nil {
-			return c.PrintErrorf("invalid value %q for environment variable %q: %w", val, env.Name, setErr)
-		}
+func (c *Command) fromEnv(name string, set func(string) error) (bool, *Error) {
+	if name == "" {
+		return false, nil
 	}
 
+	val, ok := os.LookupEnv(name)
+	if !ok {
+		return false, nil
+	}
+
+	if err := set(val); err != nil {
+		return false, c.PrintErrorf("invalid value %q for environment variable %q: %w", val, name, err)
+	}
+	return true, nil
+}
+
+// resolveEnvVar assigns a standalone EnvVar's Dest its fallback value:
+// the environment variable envName when it is present (see fromEnv),
+// otherwise def. Exactly one of the two is applied, so dest is written
+// at most once. Unlike an Argument/Option -- whose typed Default is
+// assigned directly by setDefault -- an EnvVar's Default is still an
+// untyped any, so it goes through dest.Set(fmt.Sprint(def)).
+//
+// A Default that can't be assigned is a different kind of problem from
+// a bad Env value: it can only come from a standalone EnvVar with a
+// mismatched Dest/Default -- caught first by validateDefaultType/
+// Validate -- or a custom Value implementation Validate deliberately
+// can't check (see validateDefaultType's doc comment). That is the same
+// kind of problem Validate() itself reports -- the Command was declared
+// incorrectly, not something the end user typed -- so, like Validate(),
+// it reports ExitCode() == 1 and prints nothing.
+func (c *Command) resolveEnvVar(dest Value, envName string, def any) *Error {
+	if dest == nil {
+		return nil
+	}
+
+	if found, err := c.fromEnv(envName, dest.Set); err != nil || found {
+		return err
+	}
+
+	if def == nil {
+		return nil
+	}
+	if err := dest.Set(fmt.Sprint(def)); err != nil {
+		return newError(1, "%s", fmt.Errorf("cli: invalid default value %v: %w", def, err))
+	}
 	return nil
 }
 
