@@ -5,6 +5,8 @@ import (
 	"fmt"
 )
 
+// --- Argument ----------------------------------------------------------------
+
 // Argument describes a single positional argument. Its position in
 // Command.Arguments determines the order in which it is expected on the
 // command line.
@@ -40,7 +42,14 @@ type Argument interface {
 	// Dest are the same Go type. The zero value applies too, like any
 	// other Default (see StringArgument's Default doc comment).
 	setDefault()
+
+	// validate reports a structural problem with this Argument on its
+	// own, independent of any other Argument -- today, an empty Name.
+	// Cross-item rules (unique names) stay in validateArguments.
+	validate() error
 }
+
+// --- StringArgument ----------------------------------------------------------
 
 // StringArgument describes a single string-typed positional argument --
 // the Argument implementation for the common case of an argument whose
@@ -72,9 +81,10 @@ type StringArgument struct {
 	Env string
 }
 
-func (a *StringArgument) name() string { return a.Name }
-func (a *StringArgument) help() string { return a.Help }
-func (a *StringArgument) env() string  { return a.Env }
+func (a *StringArgument) name() string    { return a.Name }
+func (a *StringArgument) help() string    { return a.Help }
+func (a *StringArgument) env() string     { return a.Env }
+func (a *StringArgument) validate() error { return validateArgumentName(a.Name) }
 
 func (a *StringArgument) set(s string) error {
 	if a.Dest != nil {
@@ -88,6 +98,8 @@ func (a *StringArgument) setDefault() {
 		*a.Dest = a.Default
 	}
 }
+
+// --- IntArgument -------------------------------------------------------------
 
 // IntArgument describes a single int-typed positional argument -- the
 // Argument implementation for a value that must parse as a Go int
@@ -111,9 +123,10 @@ type IntArgument struct {
 	Env string
 }
 
-func (a *IntArgument) name() string { return a.Name }
-func (a *IntArgument) help() string { return a.Help }
-func (a *IntArgument) env() string  { return a.Env }
+func (a *IntArgument) name() string    { return a.Name }
+func (a *IntArgument) help() string    { return a.Help }
+func (a *IntArgument) env() string     { return a.Env }
+func (a *IntArgument) validate() error { return validateArgumentName(a.Name) }
 
 func (a *IntArgument) set(s string) error {
 	if a.Dest == nil {
@@ -133,8 +146,21 @@ func (a *IntArgument) setDefault() {
 	}
 }
 
-// validateArguments checks args for structural problems: an empty or
-// duplicate Name. It is a free function (not a *Command method) so it
+// --- Validate ----------------------------------------------------------------
+
+// validateArgumentName is the per-item rule shared by every Argument
+// implementation's validate() method: every Argument needs a display
+// name -- it's what shows up in the usage line (e.g. "[qux]") and the
+// Arguments: help section.
+func validateArgumentName(name string) error {
+	if name == "" {
+		return errors.New("cli: Argument.Name must not be empty")
+	}
+	return nil
+}
+
+// validateArguments checks args for structural problems: an invalid
+// Argument (see Argument.validate) or a duplicate Name. It is a free function (not a *Command method) so it
 // stays decoupled from Command and testable on its own. Unlike the old
 // design, there's no Default/Dest type check to run here -- a typed
 // Argument's Default is already the same Go type as its Dest, enforced
@@ -143,12 +169,11 @@ func (a *IntArgument) setDefault() {
 func validateArguments(args []Argument) error {
 	seenNames := make(map[string]bool, len(args))
 	for _, arg := range args {
-		// Every Argument needs a display name -- it's what shows up in
-		// the usage line (e.g. "[qux]") and the Arguments: help section.
-		name := arg.name()
-		if name == "" {
-			return errors.New("cli: Argument.Name must not be empty")
+		// Per-item rules live on the Argument itself.
+		if err := arg.validate(); err != nil {
+			return err
 		}
+		name := arg.name()
 
 		// Argument names must be unique -- Parse fills positional
 		// Arguments in declaration order, so a duplicate name would be

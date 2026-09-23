@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+// --- Option ------------------------------------------------------------------
+
 func TestOptionFlag(t *testing.T) {
 	tests := []struct {
 		input string
@@ -69,6 +71,8 @@ func TestOptionName(t *testing.T) {
 	}
 }
 
+// --- IntOption ---------------------------------------------------------------
+
 // TestIntOption_Accessors covers the IntOption accessors the rest of the
 // suite happens not to reach: Parse/Validate/HelpString already exercise
 // name()/flag()/long() (via the various "-n" test cases), but none of
@@ -85,6 +89,8 @@ func TestIntOption_Accessors(t *testing.T) {
 		t.Errorf("action() = %v, want nil, unset", got)
 	}
 }
+
+// --- Validate ----------------------------------------------------------------
 
 // TestValidateOptions exercises validateOptions directly, against a bare
 // []Option, without needing a full Command wrapper.
@@ -197,6 +203,35 @@ func TestValidateOptions(t *testing.T) {
 			err := validateOptions(tt.opts)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateOptions() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestOption_Validate covers the per-item rules of every Option type.
+func TestOption_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		opt     Option
+		wantErr bool
+	}{
+		{name: "StringOption Flag only", opt: &StringOption{Flag: "f"}},
+		{name: "StringOption Long only", opt: &StringOption{Long: "foo"}},
+		{name: "StringOption missing Flag and Long", opt: &StringOption{}, wantErr: true},
+		{name: "StringOption Flag too long", opt: &StringOption{Flag: "-ab"}, wantErr: true},
+		{name: "IntOption Flag and Long", opt: &IntOption{Flag: "n", Long: "num"}},
+		{name: "IntOption missing Flag and Long", opt: &IntOption{}, wantErr: true},
+		{name: "IntOption Flag with only dashes", opt: &IntOption{Flag: "--"}, wantErr: true},
+		{name: "BoolOption Long only", opt: &BoolOption{Long: "verbose"}},
+		{name: "BoolOption missing Flag and Long", opt: &BoolOption{}, wantErr: true},
+		{name: "BoolOption Flag too long", opt: &BoolOption{Flag: "ab"}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.opt.validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

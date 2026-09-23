@@ -6,6 +6,8 @@ import (
 	"strings"
 )
 
+// --- Option ------------------------------------------------------------------
+
 // Option describes a single flag (e.g. "-f, --foo"). Unlike Argument, the
 // order of Options in Command.Options has no effect on parsing: flags can
 // appear in any order on the command line.
@@ -31,6 +33,12 @@ type Option interface {
 	flag() string
 	long() string
 	action() Action
+
+	// validate reports a structural problem with this Option on its
+	// own, independent of any other Option -- a missing Flag/Long or a
+	// malformed Flag. Cross-item rules (uniqueness of Flag, Long and
+	// name()) stay in validateOptions.
+	validate() error
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, first
@@ -65,6 +73,8 @@ func optionName(name, flag, long string) string {
 		return strings.TrimPrefix(flag, "-")
 	}
 }
+
+// --- StringOption ------------------------------------------------------------
 
 // StringOption describes a single string-typed flag -- the Option
 // implementation for the common case of a flag whose value is just the
@@ -147,9 +157,12 @@ func (o *StringOption) setDefault() {
 	}
 }
 
-func (o *StringOption) flag() string   { return normalizeDashes(o.Flag, 1) }
-func (o *StringOption) long() string   { return normalizeDashes(o.Long, 2) }
-func (o *StringOption) action() Action { return o.Action }
+func (o *StringOption) flag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *StringOption) long() string    { return normalizeDashes(o.Long, 2) }
+func (o *StringOption) action() Action  { return o.Action }
+func (o *StringOption) validate() error { return validateOptionForms(o.flag(), o.long()) }
+
+// --- IntOption ---------------------------------------------------------------
 
 // IntOption describes a single flag whose value must parse as a Go int
 // (strconv.Atoi) -- the Option implementation for the common case of an
@@ -206,9 +219,12 @@ func (o *IntOption) setDefault() {
 	}
 }
 
-func (o *IntOption) flag() string   { return normalizeDashes(o.Flag, 1) }
-func (o *IntOption) long() string   { return normalizeDashes(o.Long, 2) }
-func (o *IntOption) action() Action { return o.Action }
+func (o *IntOption) flag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *IntOption) long() string    { return normalizeDashes(o.Long, 2) }
+func (o *IntOption) action() Action  { return o.Action }
+func (o *IntOption) validate() error { return validateOptionForms(o.flag(), o.long()) }
+
+// --- BoolOption --------------------------------------------------------------
 
 // BoolOption describes a single boolean flag -- one whose mere presence
 // on the command line sets it, never consuming a following token (see
@@ -264,9 +280,12 @@ func (o *BoolOption) setDefault() {
 	}
 }
 
-func (o *BoolOption) flag() string   { return normalizeDashes(o.Flag, 1) }
-func (o *BoolOption) long() string   { return normalizeDashes(o.Long, 2) }
-func (o *BoolOption) action() Action { return o.Action }
+func (o *BoolOption) flag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *BoolOption) long() string    { return normalizeDashes(o.Long, 2) }
+func (o *BoolOption) action() Action  { return o.Action }
+func (o *BoolOption) validate() error { return validateOptionForms(o.flag(), o.long()) }
+
+// --- Action ------------------------------------------------------------------
 
 // Action is a hook that runs when its Option's flag is seen on the
 // command line. Parse calls it as opt.action()(c, opt, value): c is
@@ -313,8 +332,29 @@ func (o *BoolOption) action() Action { return o.Action }
 // built-ins do.
 type Action func(c *Command, opt Option, value string) *Error
 
-// validateOptions checks opts for structural problems: a missing
-// Flag/Long, a malformed or duplicate Flag/Long, or a duplicate name()
+// --- Validate ----------------------------------------------------------------
+
+// validateOptionForms is the per-item rule shared by every Option
+// implementation's validate() method. flag and long are expected in
+// normalized form (see normalizeDashes).
+func validateOptionForms(flag, long string) error {
+	// An Option needs at least one of Flag/Long to be reachable from
+	// the command line at all.
+	if flag == "" && long == "" {
+		return errors.New("cli: Option must set Flag and/or Long")
+	}
+
+	// The short form's fixed length ("-x") is what lets help output use
+	// a constant-width Flag column instead of computing one per Command.
+	if flag != "" && len(flag) != 2 {
+		return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
+	}
+	return nil
+}
+
+// validateOptions checks opts for structural problems: an invalid Option
+// (see Option.validate: a missing Flag/Long or a malformed Flag), a
+// duplicate Flag/Long, or a duplicate name()
 // (Option.Name, or the name derived from Long/Flag when Name is unset
 // -- Parse keys its "set on the command line" bookkeeping by it, so it
 // has to be unique). Same free-function
@@ -339,19 +379,12 @@ func validateOptions(opts []Option) error {
 		flag := opt.flag()
 		long := opt.long()
 
-		// An Option needs at least one of Flag/Long to be reachable from
-		// the command line at all.
-		if flag == "" && long == "" {
-			return errors.New("cli: Option must set Flag and/or Long")
+		// Per-item rules live on the Option itself.
+		if err := opt.validate(); err != nil {
+			return err
 		}
 
 		if flag != "" {
-			// The short form's fixed length ("-x") is what lets help
-			// output use a constant-width Flag column instead of
-			// computing one per Command.
-			if len(flag) != 2 {
-				return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
-			}
 			if seen[flag] {
 				return fmt.Errorf("cli: duplicate option flag form %q", flag)
 			}
@@ -359,9 +392,9 @@ func validateOptions(opts []Option) error {
 		}
 
 		if long != "" {
-			// Same reasoning as Flag above: Parse looks up an incoming
-			// "--xxx" token by its normalized form, so Long must be
-			// unique across Options too.
+			// Parse looks up an incoming "--xxx" token by its normalized
+			// form, so Long must be unique across Options too (and Flag
+			// above, for the same reason).
 			if seen[long] {
 				return fmt.Errorf("cli: duplicate option long form %q", long)
 			}

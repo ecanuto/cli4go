@@ -4,6 +4,8 @@ import (
 	"testing"
 )
 
+// --- IntArgument -------------------------------------------------------------
+
 // TestIntArgument_Accessors covers IntArgument.help(), an accessor the
 // rest of the suite happens not to reach.
 func TestIntArgument_Accessors(t *testing.T) {
@@ -12,6 +14,8 @@ func TestIntArgument_Accessors(t *testing.T) {
 		t.Errorf("help() = %q, want %q", got, "How many")
 	}
 }
+
+// --- Validate ----------------------------------------------------------------
 
 // TestValidateArguments exercises validateArguments directly, against a
 // bare []Argument, without needing a full Command wrapper.
@@ -51,6 +55,29 @@ func TestValidateArguments(t *testing.T) {
 			err := validateArguments(tt.args)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("validateArguments() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestArgument_Validate covers the per-item rule of every Argument type.
+func TestArgument_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		arg     Argument
+		wantErr bool
+	}{
+		{name: "StringArgument valid", arg: &StringArgument{Name: "qux"}},
+		{name: "StringArgument empty Name", arg: &StringArgument{}, wantErr: true},
+		{name: "IntArgument valid", arg: &IntArgument{Name: "count"}},
+		{name: "IntArgument empty Name", arg: &IntArgument{}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.arg.validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
