@@ -533,41 +533,22 @@ func (c *Command) Parse(args []string) *Error {
 			continue
 		}
 
-		found, err := c.fromEnv(it)
-		if err != nil {
-			return err
+		// Env wins over Default, and exactly one of the two is applied,
+		// so each Dest is written at most once. A bad Env value is a
+		// real parsing/usage error (ExitCode() == 2), printed by
+		// PrintErrorf before it is returned.
+		if name := it.env(); name != "" {
+			if val, ok := os.LookupEnv(name); ok {
+				if err := it.set(val); err != nil {
+					return c.PrintErrorf("invalid value %q for environment variable %q: %w", val, name, err)
+				}
+				continue
+			}
 		}
-		if !found {
-			it.setDefault()
-		}
+		it.setDefault()
 	}
 
 	return nil
-}
-
-// fromEnv hands the value of the environment variable named by it.env()
-// to it.set, when that name is non-empty and the variable is present,
-// reporting whether it was present. An empty or absent name just
-// reports false.
-//
-// A bad Env value is a real parsing/usage error (ExitCode() == 2),
-// already printed via PrintErrorf by the time this returns it, so
-// Parse can return it as-is.
-func (c *Command) fromEnv(it item) (bool, *Error) {
-	name := it.env()
-	if name == "" {
-		return false, nil
-	}
-
-	val, ok := os.LookupEnv(name)
-	if !ok {
-		return false, nil
-	}
-
-	if err := it.set(val); err != nil {
-		return false, c.PrintErrorf("invalid value %q for environment variable %q: %w", val, name, err)
-	}
-	return true, nil
 }
 
 // DefaultParse is a convenience wrapper around Parse that reads
