@@ -333,44 +333,11 @@ func (c *Command) Validate() *Error {
 		return newError(1, "%s", err)
 	}
 
-	// Environment variable validation -- spans Arguments, Options, and
-	// EnvVars together, so it can't live in either helper above.
-	if err := c.validateEnvVars(); err != nil {
+	// EnvVars validation. Also checks that environment variable names
+	// are unique across Arguments, Options, and EnvVars together, hence
+	// the whole item sequence.
+	if err := validateEnvVars(c.EnvVars, c.items()); err != nil {
 		return newError(1, "%s", err)
-	}
-
-	return nil
-}
-
-// validateEnvVars checks that every standalone EnvVar is valid (see
-// EnvVar.validate: a non-empty Name) and that no environment variable
-// name is declared more than once across Arguments' Env, Options' Env,
-// and EnvVars. A duplicate name would be
-// genuinely ambiguous -- two entries claiming the same environment
-// variable -- and would render as a literal duplicate row in the
-// generated "Environment Variables:" help section.
-//
-// Unlike validateArguments/validateOptions, this is a *Command method
-// rather than a free function: the name-uniqueness check is inherently
-// cross-slice (it has to see Arguments, Options, and EnvVars together),
-// so there's no single []T it could take instead.
-func (c *Command) validateEnvVars() error {
-	for _, env := range c.EnvVars {
-		if err := env.validate(); err != nil {
-			return err
-		}
-	}
-
-	seen := make(map[string]bool)
-	for it := range c.items() {
-		env := it.env()
-		if env == "" {
-			continue
-		}
-		if seen[env] {
-			return fmt.Errorf("cli: duplicate environment variable %q", env)
-		}
-		seen[env] = true
 	}
 
 	return nil
