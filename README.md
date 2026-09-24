@@ -155,6 +155,29 @@ environment variable) are reported as usage errors with exit code 2,
 while declaration mistakes (duplicate flags, empty names, duplicate
 environment variables) are reported by `Validate()` with exit code 1.
 
+### Validating your declaration
+
+A `Program` is plain data, so a mistake in it -- an empty `Name`, two
+options claiming the same flag, two items sharing a name or an
+environment variable -- is a bug in your Go code, not something an end
+user typed. `Validate()` checks the whole declaration without parsing
+anything and returns an `*Error` with exit code 1. `Parse()` runs it
+first too, but a test catches the mistake before you ship, without
+running your `main()`.
+
+We recommend at least one test per program that calls it:
+
+```go
+func TestProgram(t *testing.T) {
+	if err := newProgram().Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+```
+
+Here `newProgram()` is whatever function builds your `Program` literal;
+keeping it out of `main()` is what makes it testable.
+
 ## Status
 
 `cli4go` is under active early development. The API is not stable yet
