@@ -351,6 +351,10 @@ func (c *Command) Validate() *Error {
 // looked up as-is, so it fails as an unknown option unless something
 // is literally flagged "-b=value".
 //
+// An Option can be given only once on the command line, through either
+// its Flag or its Long form: a repeat is a usage error, and the first
+// occurrence's Dest and Action have already run by then.
+//
 // Parse returns:
 //   - nil: parsing succeeded.
 //   - ErrHelp / ErrVersion (ExitCode() == 0): a built-in action fired;
@@ -362,7 +366,7 @@ func (c *Command) Validate() *Error {
 //     declared incorrectly, as reported by Validate(). Nothing is
 //     printed.
 //   - a real parsing/usage error (ExitCode() == 2): an unknown or
-//     invalid option/argument, including a bad Env value, or whatever
+//     invalid or repeated option/argument, including a bad Env value, or whatever
 //     *Error a caller-declared Option's Action chose to return. Parse
 //     prints a clap-style block to c.Stderr before returning (see
 //     below) for everything except an Action's own *Error, which
@@ -431,6 +435,13 @@ func (c *Command) Parse(args []string) *Error {
 			opt, ok := opts[key]
 			if !ok {
 				return c.PrintErrorf("unknown option %q", tok)
+			}
+
+			// An Option may appear at most once, whichever of its
+			// forms (Flag or Long) each occurrence uses; the error
+			// echoes the token that repeated it.
+			if seen[opt] {
+				return c.PrintErrorf("option %q cannot be used multiple times", tok)
 			}
 			seen[opt] = true
 

@@ -1145,6 +1145,45 @@ func TestParse_TokenLoop(t *testing.T) {
 		}
 	})
 
+	t.Run("an Option repeated in either form is a usage error", func(t *testing.T) {
+		tests := []struct {
+			name string
+			args []string
+			want string
+		}{
+			{"same token twice", []string{"-b", "x", "-b", "y"}, `option "-b" cannot be used multiple times`},
+			{"Flag then Long", []string{"-b", "x", "--bar", "y"}, `option "--bar" cannot be used multiple times`},
+			{"Long then Long with =", []string{"--bar", "x", "--bar=y"}, `option "--bar=y" cannot be used multiple times`},
+			{"boolean Option", []string{"-f", "-f"}, `option "-f" cannot be used multiple times`},
+		}
+		for _, tt := range tests {
+			t.Run(tt.name, func(t *testing.T) {
+				var bar string
+				var foo bool
+				var buf bytes.Buffer
+				c := &Command{
+					Name: "myprogram",
+					Options: []Option{
+						&StringOption{Flag: "-b", Long: "--bar", Dest: &bar},
+						&BoolOption{Flag: "-f", Dest: &foo},
+					},
+					Stderr: &buf,
+				}
+
+				err := c.Parse(tt.args)
+				if err == nil || err.ExitCode() != 2 {
+					t.Fatalf("Parse() = %v, want a code-2 error", err)
+				}
+				if err.Error() != tt.want {
+					t.Errorf("Parse().Error() = %q, want %q", err.Error(), tt.want)
+				}
+				if got, want := buf.String(), c.ErrorString(errors.New(tt.want)); got != want {
+					t.Errorf("Parse() wrote %q to Stderr, want %q", got, want)
+				}
+			})
+		}
+	})
+
 	t.Run("bool flag: presence alone sets it, without consuming the next token", func(t *testing.T) {
 		var foo bool
 		var qux string

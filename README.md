@@ -150,6 +150,9 @@ once, so a `Default` left at its zero value is applied like any other:
 it overwrites whatever `Dest` held before `Parse()`. Set the initial
 value through `Default`, not by pre-filling the destination.
 
+An option can be given only once, through either its short or long
+form; repeating it is a usage error too (exit code 2).
+
 Invalid values (for example a non-numeric `IntOption` or a bad
 environment variable) are reported as usage errors with exit code 2,
 while declaration mistakes (duplicate flags, empty names, duplicate
