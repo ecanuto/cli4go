@@ -148,13 +148,12 @@ type StringOption struct {
 	Action Action
 }
 
-func (o *StringOption) name() string   { return optionName(o.Name, o.flag(), o.long()) }
-func (o *StringOption) help() string   { return o.Help }
-func (o *StringOption) flag() string   { return normalizeDashes(o.Flag, 1) }
-func (o *StringOption) long() string   { return normalizeDashes(o.Long, 2) }
-func (o *StringOption) env() string    { return o.Env }
-func (o *StringOption) action() Action { return o.Action }
-
+func (o *StringOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
+func (o *StringOption) flag() string       { return normalizeDashes(o.Flag, 1) }
+func (o *StringOption) long() string       { return normalizeDashes(o.Long, 2) }
+func (o *StringOption) help() string       { return o.Help }
+func (o *StringOption) env() string        { return o.Env }
+func (o *StringOption) action() Action     { return o.Action }
 func (o *StringOption) validate() error    { return optionValidate(o) }
 func (o *StringOption) set(s string) error { return setDest(o.Dest, s, parseString) }
 func (o *StringOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
@@ -194,13 +193,12 @@ type IntOption struct {
 	Action Action
 }
 
-func (o *IntOption) name() string   { return optionName(o.Name, o.flag(), o.long()) }
-func (o *IntOption) help() string   { return o.Help }
-func (o *IntOption) flag() string   { return normalizeDashes(o.Flag, 1) }
-func (o *IntOption) long() string   { return normalizeDashes(o.Long, 2) }
-func (o *IntOption) env() string    { return o.Env }
-func (o *IntOption) action() Action { return o.Action }
-
+func (o *IntOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
+func (o *IntOption) flag() string       { return normalizeDashes(o.Flag, 1) }
+func (o *IntOption) long() string       { return normalizeDashes(o.Long, 2) }
+func (o *IntOption) help() string       { return o.Help }
+func (o *IntOption) env() string        { return o.Env }
+func (o *IntOption) action() Action     { return o.Action }
 func (o *IntOption) validate() error    { return optionValidate(o) }
 func (o *IntOption) set(s string) error { return setDest(o.Dest, s, parseInt) }
 func (o *IntOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
@@ -238,13 +236,12 @@ type BoolOption struct {
 	Action Action
 }
 
-func (o *BoolOption) name() string   { return optionName(o.Name, o.flag(), o.long()) }
-func (o *BoolOption) help() string   { return o.Help }
-func (o *BoolOption) flag() string   { return normalizeDashes(o.Flag, 1) }
-func (o *BoolOption) long() string   { return normalizeDashes(o.Long, 2) }
-func (o *BoolOption) env() string    { return o.Env }
-func (o *BoolOption) action() Action { return o.Action }
-
+func (o *BoolOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
+func (o *BoolOption) flag() string       { return normalizeDashes(o.Flag, 1) }
+func (o *BoolOption) long() string       { return normalizeDashes(o.Long, 2) }
+func (o *BoolOption) help() string       { return o.Help }
+func (o *BoolOption) env() string        { return o.Env }
+func (o *BoolOption) action() Action     { return o.Action }
 func (o *BoolOption) validate() error    { return optionValidate(o) }
 func (o *BoolOption) set(s string) error { return setDest(o.Dest, s, parseBool) }
 func (o *BoolOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
