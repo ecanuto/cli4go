@@ -495,8 +495,8 @@ func TestItems(t *testing.T) {
 }
 
 // TestItems_StopsEarly covers the early exit of each of items' three
-// loops, the same reason TestOptions_StopsEarly needed more than one
-// stopping point.
+// loops, for the same reason as TestOptions_StopsEarly: one stopping
+// point per loop.
 func TestItems_StopsEarly(t *testing.T) {
 	cmd := Command{
 		Name:      "myprogram",
@@ -872,8 +872,8 @@ func TestValidate(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			// Every Validate failure reports ExitCode() == 1 -- see its
-			// doc comment.
+			// Every Validate failure reports ExitCode() == 1 -- see
+			// Validate's doc comment.
 			if err != nil && err.ExitCode() != 1 {
 				t.Errorf("Validate().ExitCode() = %d, want 1", err.ExitCode())
 			}
@@ -989,7 +989,7 @@ func TestParse(t *testing.T) {
 	})
 
 	t.Run("a Validate failure short-circuits before any Env resolution", func(t *testing.T) {
-		c := &Command{} // empty Name -> Validate fails
+		c := &Command{} // an empty Name makes Validate fail
 		err := c.Parse(nil)
 		if err == nil {
 			t.Fatal("Parse() = nil, want error")
@@ -1032,7 +1032,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name: "myprogram",
 			Options: []Option{&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Custom help",
-				// A boolean Dest keeps the Option from consuming a value.
+				// A BoolOption never consumes the next token as its value.
 				Dest: &custom,
 				Action: func(c *Command, opt Option, value string) *Error {
 					ran = true
@@ -1569,10 +1569,9 @@ func TestParse_TokenLoop(t *testing.T) {
 
 // TestDefaultParse only exercises the DefaultParse -> Parse -> Validate
 // wiring (one success, one Validate failure) using os.Args directly.
-// Everything else Parse will eventually do -- consuming flags,
-// positional Arguments, Env values -- is Parse's own behavior, not
-// something specific to DefaultParse, so those cases belong in
-// TestParse, not here.
+// Everything else Parse does -- consuming flags, positional Arguments,
+// Env values -- is Parse's own behavior, not something specific to
+// DefaultParse, so those cases belong in TestParse, not here.
 func TestDefaultParse(t *testing.T) {
 	// os.Args is global process state; save and restore it so this test
 	// doesn't leak into other tests or a real `go test` invocation's own
@@ -1618,9 +1617,8 @@ func TestErrorString(t *testing.T) {
 			},
 		},
 		{
-			// Regression guard for the "error: " prefix: it must be
-			// display-only, added here, and never baked into the
-			// message the underlying error itself carries.
+			// The "error: " prefix is display-only: added here, never part
+			// of the message the underlying error itself carries.
 			name: "message with a quoted token",
 			cmd:  Command{Name: "myprogram"},
 			err:  errors.New(`unknown option "--nope"`),
@@ -1856,9 +1854,8 @@ func TestHelpString(t *testing.T) {
 			},
 		},
 		{
-			// Regression guard for the width+4/-4 offset: an Argument row has
-			// no "-x, " flag column, so its help text must still land in the
-			// same output column as an Option row's.
+			// An Argument row has no "-x, " flag column, so its help text
+			// must still land in the same output column as an Option row's.
 			name: "argument and option aligned to one shared column",
 			cmd: Command{
 				Name:      "myprogram",
@@ -1953,8 +1950,7 @@ func TestHelpString(t *testing.T) {
 			},
 		},
 		{
-			// The section lists Arguments before Options; this is the
-			// regression guard for that order.
+			// The section lists Arguments before Options.
 			name: "env vars from both an Argument and an Option, Arguments first",
 			cmd: Command{
 				Name:      "myprogram",
@@ -2026,8 +2022,8 @@ func TestHelpString(t *testing.T) {
 			},
 		},
 		{
-			// End-to-end regression guard for the section's order:
-			// Arguments, then Options, then standalone EnvVars last.
+			// The section's order end to end: Arguments, then Options,
+			// then standalone EnvVars last.
 			name: "standalone EnvVars listed after Argument/Option env vars",
 			cmd: Command{
 				Name:      "myprogram",
@@ -2138,8 +2134,8 @@ func TestPrintVersion(t *testing.T) {
 	}
 }
 
-// TestParse_Resolution covers what moving Env/Default resolution after
-// the token loop guarantees: only items the command line did not set
+// TestParse_Resolution covers Env/Default resolution, which runs after
+// the token loop: only items the command line did not set
 // are resolved, and a failed parse leaves every Dest untouched.
 func TestParse_Resolution(t *testing.T) {
 	t.Run("command line wins and its item's bad env value is never read", func(t *testing.T) {
@@ -2273,7 +2269,7 @@ func TestSetDefault(t *testing.T) {
 			&BoolOption{Flag: "-b", Default: true},
 		}
 		for _, it := range items {
-			it.setDefault() // must not panic
+			it.setDefault() // a nil Dest must not panic
 		}
 	})
 }

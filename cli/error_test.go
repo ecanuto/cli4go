@@ -79,11 +79,10 @@ func TestExitCode(t *testing.T) {
 			if got := tt.err.ExitCode(); got != tt.wantCode {
 				t.Errorf("ExitCode() = %d, want %d", got, tt.wantCode)
 			}
-			// Regression guard: only a code-0 Error (ErrHelp/ErrVersion) may
-			// also classify as ErrExit. A Validate failure or a real
-			// parsing/usage error must NOT satisfy errors.Is(err, ErrExit),
-			// or a caller checking that would wrongly treat a real failure
-			// as an already-printed clean exit.
+			// Only a code-0 Error (ErrHelp/ErrVersion) also classifies as
+			// ErrExit. A Validate failure or a usage error must not, or a
+			// caller checking errors.Is(err, ErrExit) would mistake a real
+			// failure for an already-printed clean exit.
 			if got := errors.Is(tt.err, ErrExit); got != tt.wantIsExit {
 				t.Errorf("errors.Is(err, ErrExit) = %v, want %v", got, tt.wantIsExit)
 			}
