@@ -25,26 +25,7 @@ import (
 // unexported accessor methods with different names, so field and method
 // never collide.
 type Argument interface {
-	name() string
-	help() string
-	env() string
-
-	// validate reports a structural problem with this Argument on its
-	// own, independent of any other Argument -- today, an empty Name.
-	// Cross-item rules (unique names) stay in validateArguments.
-	validate() error
-
-	// set parses s into Dest, the token Parse (or an Env lookup) just
-	// resolved for this Argument. It returns whatever conversion error
-	// the concrete type produces (none for a string), and does nothing
-	// -- returning nil -- when Dest is unset.
-	set(s string) error
-
-	// setDefault assigns Default to Dest directly, when Dest is set --
-	// no string round trip, and it can never fail, since Default and
-	// Dest are the same Go type. The zero value applies too, like any
-	// other Default (see StringArgument's Default doc comment).
-	setDefault()
+	item
 }
 
 // argumentValidate is the base behavior behind every Argument
@@ -160,7 +141,7 @@ func (a *IntArgument) setDefault() {
 // --- Validate ----------------------------------------------------------------
 
 // validateArguments checks args for structural problems: an invalid
-// Argument (see Argument.validate) or a duplicate Name. It is a free
+// Argument (see item.validate) or a duplicate Name. It is a free
 // function (not a *Command method) so it stays decoupled from Command
 // and testable on its own. There is no Default/Dest type check to run
 // here -- a typed Argument's Default is already the same Go type as its

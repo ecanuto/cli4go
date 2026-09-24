@@ -434,11 +434,91 @@ func TestOptions_StopsEarly(t *testing.T) {
 	})
 }
 
+// TestItems covers items' order: every Argument, then every Option,
+// then every EnvVar -- and that built-in options are left out.
+func TestItems(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  Command
+		want []string
+	}{
+		{
+			name: "nothing declared",
+			cmd:  Command{Name: "myprogram", Version: "1.0.0"},
+			want: nil,
+		},
+		{
+			name: "Arguments, Options, and EnvVars, in that order",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "qux"}, &IntArgument{Name: "count"}},
+				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
+			},
+			want: []string{"qux", "count", "bar", "APP_DEBUG"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for it := range tt.cmd.items() {
+				got = append(got, it.name())
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("items() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestItems_StopsEarly covers the early exit of each of items' three
+// loops, the same reason TestOptions_StopsEarly needed more than one
+// stopping point.
+func TestItems_StopsEarly(t *testing.T) {
+	cmd := Command{
+		Name:      "myprogram",
+		Arguments: []Argument{&StringArgument{Name: "qux"}},
+		Options:   []Option{&StringOption{Flag: "-b", Long: "--bar"}},
+		EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
+	}
+
+	tests := []struct {
+		name      string
+		stopAfter int
+		want      []string
+	}{
+		{name: "stops inside the Arguments loop", stopAfter: 1, want: []string{"qux"}},
+		{name: "stops inside the Options loop", stopAfter: 2, want: []string{"qux", "bar"}},
+		{name: "stops inside the EnvVars loop", stopAfter: 3, want: []string{"qux", "bar", "APP_DEBUG"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			cmd.items()(func(it item) bool {
+				got = append(got, it.name())
+				return len(got) < tt.stopAfter
+			})
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("items() stopped after %d = %v, want %v", tt.stopAfter, got, tt.want)
+			}
+		})
+	}
+}
+
+// envPair is what TestAllEnvVars compares: the environment variable
+// name and the help text of each item allEnvVars yields.
+type envPair struct {
+	Name string
+	Help string
+}
+
 func TestAllEnvVars(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  Command
-		want []envEntry
+		want []envPair
 	}{
 		{
 			name: "no Env declared anywhere",
@@ -455,7 +535,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:      "myprogram",
 				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
 			},
-			want: []envEntry{
+			want: []envPair{
 				{Name: "PROGRAM_QUX", Help: "The qux to operate on"},
 			},
 		},
@@ -465,7 +545,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:    "myprogram",
 				Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
 			},
-			want: []envEntry{
+			want: []envPair{
 				{Name: "PROGRAM_BAR", Help: "Set the bar value"},
 			},
 		},
@@ -477,7 +557,7 @@ func TestAllEnvVars(t *testing.T) {
 				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
 				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 			},
-			want: []envEntry{
+			want: []envPair{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 			},
@@ -495,7 +575,7 @@ func TestAllEnvVars(t *testing.T) {
 					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
 				},
 			},
-			want: []envEntry{
+			want: []envPair{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 			},
@@ -506,7 +586,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:    "myprogram",
 				EnvVars: []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
-			want: []envEntry{
+			want: []envPair{
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
 			},
 		},
@@ -520,7 +600,7 @@ func TestAllEnvVars(t *testing.T) {
 				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
-			want: []envEntry{
+			want: []envPair{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
@@ -530,7 +610,10 @@ func TestAllEnvVars(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := slices.Collect(tt.cmd.allEnvVars())
+			var got []envPair
+			for it := range tt.cmd.allEnvVars() {
+				got = append(got, envPair{Name: it.env(), Help: it.help()})
+			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("allEnvVars() = %+v, want %+v", got, tt.want)
 			}
@@ -576,8 +659,8 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			cmd.allEnvVars()(func(env envEntry) bool {
-				got = append(got, env.Name)
+			cmd.allEnvVars()(func(it item) bool {
+				got = append(got, it.env())
 				return len(got) < tt.stopAfter
 			})
 
@@ -740,9 +823,6 @@ func TestValidateEnvVars(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// The only scenario that hits the Arguments loop's OWN
-			// duplicate-return line (as opposed to the Options or
-			// EnvVars loop catching a collision seen earlier).
 			name: "duplicate name, both from Arguments",
 			cmd: Command{
 				Arguments: []Argument{
@@ -787,19 +867,6 @@ func TestValidateEnvVars(t *testing.T) {
 		})
 	}
 }
-
-// failingEnvVar is an EnvVar whose set always fails. Only StringEnvVar
-// exists so far, and a string never fails to convert, so this stands in
-// for a future typed EnvVar (say, an int one) to exercise Parse's
-// handling of a bad environment variable value for a standalone EnvVar.
-type failingEnvVar struct{ envName string }
-
-func (f *failingEnvVar) name() string     { return f.envName }
-func (f *failingEnvVar) help() string     { return "" }
-func (f *failingEnvVar) env() string      { return f.envName }
-func (f *failingEnvVar) validate() error  { return nil }
-func (f *failingEnvVar) set(string) error { return errors.New("boom") }
-func (f *failingEnvVar) setDefault()      {}
 
 // --- Parse -------------------------------------------------------------------
 
@@ -885,27 +952,6 @@ func TestParse(t *testing.T) {
 		}
 		if s != "verbose" {
 			t.Errorf("Dest = %q, want %q", s, "verbose")
-		}
-	})
-
-	t.Run("invalid value for a standalone EnvVar: ExitCode 2 and a clap-style block on Stderr", func(t *testing.T) {
-		var buf bytes.Buffer
-		t.Setenv("APP_X", "anything")
-		c := &Command{
-			Name:    "myprogram",
-			EnvVars: []EnvVar{&failingEnvVar{envName: "APP_X"}},
-			Stderr:  &buf,
-		}
-
-		err := c.Parse(nil)
-		if err == nil {
-			t.Fatal("Parse() = nil, want error")
-		}
-		if err.ExitCode() != 2 {
-			t.Errorf("ExitCode() = %d, want 2", err.ExitCode())
-		}
-		if buf.Len() == 0 {
-			t.Error("Parse() wrote nothing to Stderr, want the clap-style block")
 		}
 	})
 

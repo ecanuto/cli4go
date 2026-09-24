@@ -16,23 +16,7 @@ import "errors"
 // type, so there is nothing to type-check at runtime. See Argument's
 // doc comment.
 type EnvVar interface {
-	name() string
-	help() string
-	env() string
-
-	// validate reports a structural problem with this EnvVar on its own
-	// -- today, an empty Name. Cross-item rules (unique environment
-	// variable names across Arguments, Options, and EnvVars) stay in
-	// Command.validateEnvVars.
-	validate() error
-
-	// set stores s, the value of the environment variable, into Dest.
-	// See Argument.set.
-	set(s string) error
-
-	// setDefault assigns Default to Dest, when Dest is set. See
-	// Argument.setDefault.
-	setDefault()
+	item
 }
 
 // envVarValidate is the base behavior behind every EnvVar

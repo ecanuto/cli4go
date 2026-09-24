@@ -23,21 +23,10 @@ import (
 // methods with different names from the fields they read, so field and
 // method never collide.
 type Option interface {
-	name() string
-	help() string
-	env() string
+	item
 	flag() string
 	long() string
 	action() Action
-
-	// validate reports a structural problem with this Option on its
-	// own, independent of any other Option -- a missing Flag/Long or a
-	// malformed Flag. Cross-item rules (uniqueness of Flag, Long and
-	// name()) stay in validateOptions.
-	validate() error
-
-	set(s string) error // see Argument.set
-	setDefault()        // see Argument.setDefault
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, first
@@ -350,11 +339,11 @@ type Action func(c *Command, opt Option, value string) *Error
 // --- Validate ----------------------------------------------------------------
 
 // validateOptions checks opts for structural problems: an invalid Option
-// (see Option.validate: a missing Flag/Long or a malformed Flag), a
+// (see item.validate: a missing Flag/Long or a malformed Flag), a
 // duplicate Flag/Long, or a duplicate name()
-// (Option.Name, or the name derived from Long/Flag when Name is unset
-// -- Parse keys its "set on the command line" bookkeeping by it, so it
-// has to be unique). Same free-function
+// (Option.Name, or the name derived from Long/Flag when Name is unset),
+// which is the Option's stable identifier and so has to be unique. Same
+// free-function
 // shape as validateArguments, for the same reason -- and the same note
 // applies: no Default/Dest type check here, since a typed Option's
 // Default is already the same Go type as its Dest.

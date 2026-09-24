@@ -191,45 +191,83 @@ func (c *Command) options() iter.Seq[Option] {
 	}
 }
 
-// envEntry is what the generated help needs to know about one
-// environment variable: its name and its help text.
-type envEntry struct {
-	Name string
-	Help string
+// item is what Argument, Option, and EnvVar have in common: something
+// declared on a Command that can receive a value -- from the command
+// line, from an environment variable, or from its Default -- and be
+// checked for structural problems. Parse and Validate treat every item
+// alike through this interface (see items); what sets each family apart
+// (positional order, Flag/Long, Action) lives on Argument and Option
+// themselves.
+type item interface {
+	name() string
+	help() string
+
+	// env returns the name of the environment variable this item falls
+	// back to when the command line does not set it, or "" if none. An
+	// EnvVar's env is its own name.
+	env() string
+
+	// validate reports a structural problem with this item on its own,
+	// independent of any other item -- an empty Name, a missing
+	// Flag/Long, ... Cross-item rules (unique names, flags, and
+	// environment variable names) stay in the Command-level checks.
+	validate() error
+
+	// set parses s into Dest, the token Parse (or an Env lookup) just
+	// resolved for this item. It returns whatever conversion error the
+	// concrete type produces (none for a string), and does nothing --
+	// returning nil -- when Dest is unset.
+	set(s string) error
+
+	// setDefault assigns Default to Dest directly, when Dest is set --
+	// no string round trip, and it can never fail, since Default and
+	// Dest are the same Go type. The zero value applies too, like any
+	// other Default (see StringArgument's Default doc comment).
+	setDefault()
 }
 
-// allEnvVars returns a generator function that yields an envEntry for
-// every Argument and Option in the Command that defines an Env field,
-// followed by one for every entry in EnvVars itself. The generator
-// yields environment variables from Arguments first, then Options, then
-// EnvVars, in that order. The generator stops yielding when yield
-// returns false.
-//
-// The entries carry only what HelpString, their only caller, reads.
-// Dest and Default stay on the Argument/Option/EnvVar itself: Parse
-// resolves Env/Default per item (see fromEnv/setDefault) and does not
-// walk this sequence.
-func (c *Command) allEnvVars() iter.Seq[envEntry] {
-	return func(yield func(envEntry) bool) {
+// items returns a generator function that yields every declared
+// Argument, in declaration order, followed by every declared Option and
+// then every EnvVar -- the three families as one sequence of item, for
+// the steps that treat them alike. Built-in options are not included:
+// they have no Env and no Default of their own. The generator stops
+// yielding when yield returns false.
+func (c *Command) items() iter.Seq[item] {
+	return func(yield func(item) bool) {
 		for _, arg := range c.Arguments {
-			if arg.env() != "" {
-				if !yield(envEntry{Name: arg.env(), Help: arg.help()}) {
-					return
-				}
+			if !yield(arg) {
+				return
 			}
 		}
 
-		for opt := range c.options() {
-			if opt.env() != "" {
-				if !yield(envEntry{Name: opt.env(), Help: opt.help()}) {
-					return
-				}
+		for _, opt := range c.Options {
+			if !yield(opt) {
+				return
 			}
 		}
 
 		for _, env := range c.EnvVars {
-			if !yield(envEntry{Name: env.env(), Help: env.help()}) {
+			if !yield(env) {
 				return
+			}
+		}
+	}
+}
+
+// allEnvVars returns a generator function that yields every item in the
+// Command that declares an environment variable (env() != ""): first
+// the Arguments, then the Options, then the EnvVars, in that order. The
+// generator stops yielding when yield returns false.
+//
+// It exists for HelpString, its only caller, which reads each item's
+// env() and help().
+func (c *Command) allEnvVars() iter.Seq[item] {
+	return func(yield func(item) bool) {
+		for it := range c.items() {
+			if it.env() != "" {
+				if !yield(it) {
+					return
+				}
 			}
 		}
 	}
@@ -317,41 +355,22 @@ func (c *Command) Validate() *Error {
 // cross-slice (it has to see Arguments, Options, and EnvVars together),
 // so there's no single []T it could take instead.
 func (c *Command) validateEnvVars() error {
-	seen := make(map[string]bool)
-
-	for _, arg := range c.Arguments {
-		env := arg.env()
-		if env == "" {
-			continue
-		}
-		if seen[env] {
-			return fmt.Errorf("cli: duplicate environment variable %q", env)
-		}
-		seen[env] = true
-	}
-
-	for _, opt := range c.Options {
-		env := opt.env()
-		if env == "" {
-			continue
-		}
-		if seen[env] {
-			return fmt.Errorf("cli: duplicate environment variable %q", env)
-		}
-		seen[env] = true
-	}
-
 	for _, env := range c.EnvVars {
-		// Per-item rules live on the EnvVar itself.
 		if err := env.validate(); err != nil {
 			return err
 		}
+	}
 
-		name := env.name()
-		if seen[name] {
-			return fmt.Errorf("cli: duplicate environment variable %q", name)
+	seen := make(map[string]bool)
+	for it := range c.items() {
+		env := it.env()
+		if env == "" {
+			continue
 		}
-		seen[name] = true
+		if seen[env] {
+			return fmt.Errorf("cli: duplicate environment variable %q", env)
+		}
+		seen[env] = true
 	}
 
 	return nil
@@ -427,10 +446,9 @@ func (c *Command) Parse(args []string) *Error {
 		}
 	}
 
-	// Which Arguments/Options the command line itself set, by name():
+	// Which Arguments/Options the command line itself set, by identity:
 	// the resolution phase after the loop only touches the rest.
-	seenArgs := make(map[string]bool, len(c.Arguments))
-	seenOpts := make(map[string]bool, len(c.Options))
+	seen := make(map[item]bool, len(c.Arguments)+len(c.Options))
 
 	// Classic index loop, not range: consuming a value-taking Option's
 	// value requires advancing i an extra position mid-iteration.
@@ -456,7 +474,7 @@ func (c *Command) Parse(args []string) *Error {
 			if !ok {
 				return c.PrintErrorf("unknown option %q", tok)
 			}
-			seenOpts[opt.name()] = true
+			seen[opt] = true
 
 			// value is what set and Action both receive. hasValue
 			// (an attached "=value") wins over the *BoolOption check
@@ -497,7 +515,7 @@ func (c *Command) Parse(args []string) *Error {
 			}
 			arg := c.Arguments[argIndex]
 			argIndex++
-			seenArgs[arg.name()] = true
+			seen[arg] = true
 
 			if setErr := arg.set(tok); setErr != nil {
 				return c.PrintErrorf("argument %q: %w", tok, setErr)
@@ -510,49 +528,33 @@ func (c *Command) Parse(args []string) *Error {
 	// standalone EnvVars, each in declaration order. Nothing above wrote
 	// a Default or Env value, so a failure in the loop leaves every
 	// untouched Dest exactly as the caller had it.
-	for _, arg := range c.Arguments {
-		if !seenArgs[arg.name()] {
-			found, err := c.fromEnv(arg.env(), arg.set)
-			if err != nil {
-				return err
-			}
-			if !found {
-				arg.setDefault()
-			}
+	for it := range c.items() {
+		if seen[it] {
+			continue
 		}
-	}
-	for _, opt := range c.Options {
-		if !seenOpts[opt.name()] {
-			found, err := c.fromEnv(opt.env(), opt.set)
-			if err != nil {
-				return err
-			}
-			if !found {
-				opt.setDefault()
-			}
-		}
-	}
-	for _, env := range c.EnvVars {
-		found, err := c.fromEnv(env.env(), env.set)
+
+		found, err := c.fromEnv(it)
 		if err != nil {
 			return err
 		}
 		if !found {
-			env.setDefault()
+			it.setDefault()
 		}
 	}
 
 	return nil
 }
 
-// fromEnv hands the value of the environment variable name to set, when
-// name is non-empty and the variable is present, reporting whether it
-// was present. An empty or absent name just reports false.
+// fromEnv hands the value of the environment variable named by it.env()
+// to it.set, when that name is non-empty and the variable is present,
+// reporting whether it was present. An empty or absent name just
+// reports false.
 //
 // A bad Env value is a real parsing/usage error (ExitCode() == 2),
 // already printed via PrintErrorf by the time this returns it, so
 // Parse can return it as-is.
-func (c *Command) fromEnv(name string, set func(string) error) (bool, *Error) {
+func (c *Command) fromEnv(it item) (bool, *Error) {
+	name := it.env()
 	if name == "" {
 		return false, nil
 	}
@@ -562,7 +564,7 @@ func (c *Command) fromEnv(name string, set func(string) error) (bool, *Error) {
 		return false, nil
 	}
 
-	if err := set(val); err != nil {
+	if err := it.set(val); err != nil {
 		return false, c.PrintErrorf("invalid value %q for environment variable %q: %w", val, name, err)
 	}
 	return true, nil
@@ -698,8 +700,8 @@ func (c *Command) HelpString() string {
 		}
 	}
 	widthEnvs := 0
-	for env := range c.allEnvVars() {
-		w := len(env.Name)
+	for it := range c.allEnvVars() {
+		w := len(it.env())
 		if w > widthEnvs {
 			widthEnvs = w
 		}
@@ -745,8 +747,8 @@ func (c *Command) HelpString() string {
 	// one environment variable
 	if widthEnvs > 0 {
 		fmt.Fprintf(&b, "\nEnvironment Variables:\n")
-		for env := range c.allEnvVars() {
-			fmt.Fprintf(&b, "  %-*s   %s\n", width, env.Name, env.Help)
+		for it := range c.allEnvVars() {
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, it.env(), it.help())
 		}
 	}
 
