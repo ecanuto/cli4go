@@ -31,6 +31,11 @@ type Argument interface {
 	help() string
 	env() string
 
+	// validate reports a structural problem with this Argument on its
+	// own, independent of any other Argument -- today, an empty Name.
+	// Cross-item rules (unique names) stay in validateArguments.
+	validate() error
+
 	// set parses s into Dest, the token Parse (or an Env lookup) just
 	// resolved for this Argument. It returns whatever conversion error
 	// the concrete type produces (none for a string), and does nothing
@@ -42,11 +47,19 @@ type Argument interface {
 	// Dest are the same Go type. The zero value applies too, like any
 	// other Default (see StringArgument's Default doc comment).
 	setDefault()
+}
 
-	// validate reports a structural problem with this Argument on its
-	// own, independent of any other Argument -- today, an empty Name.
-	// Cross-item rules (unique names) stay in validateArguments.
-	validate() error
+// argumentValidate is the base behavior behind every Argument
+// implementation's validate() method (the closest thing Go has to a
+// parent-class call: a concrete type's validate() calls it first, then
+// adds any rule of its own): every Argument needs a display name --
+// it's what shows up in the usage line (e.g. "[qux]") and the
+// Arguments: help section. It never calls a.validate() itself.
+func argumentValidate(a Argument) error {
+	if a.name() == "" {
+		return errors.New("cli: Argument.Name must not be empty")
+	}
+	return nil
 }
 
 // --- StringArgument ----------------------------------------------------------
@@ -81,10 +94,11 @@ type StringArgument struct {
 	Env string
 }
 
-func (a *StringArgument) name() string    { return a.Name }
-func (a *StringArgument) help() string    { return a.Help }
-func (a *StringArgument) env() string     { return a.Env }
-func (a *StringArgument) validate() error { return validateArgumentName(a.Name) }
+func (a *StringArgument) name() string { return a.Name }
+func (a *StringArgument) help() string { return a.Help }
+func (a *StringArgument) env() string  { return a.Env }
+
+func (a *StringArgument) validate() error { return argumentValidate(a) }
 
 func (a *StringArgument) set(s string) error {
 	if a.Dest != nil {
@@ -123,10 +137,11 @@ type IntArgument struct {
 	Env string
 }
 
-func (a *IntArgument) name() string    { return a.Name }
-func (a *IntArgument) help() string    { return a.Help }
-func (a *IntArgument) env() string     { return a.Env }
-func (a *IntArgument) validate() error { return validateArgumentName(a.Name) }
+func (a *IntArgument) name() string { return a.Name }
+func (a *IntArgument) help() string { return a.Help }
+func (a *IntArgument) env() string  { return a.Env }
+
+func (a *IntArgument) validate() error { return argumentValidate(a) }
 
 func (a *IntArgument) set(s string) error {
 	if a.Dest == nil {
@@ -147,17 +162,6 @@ func (a *IntArgument) setDefault() {
 }
 
 // --- Validate ----------------------------------------------------------------
-
-// validateArgumentName is the per-item rule shared by every Argument
-// implementation's validate() method: every Argument needs a display
-// name -- it's what shows up in the usage line (e.g. "[qux]") and the
-// Arguments: help section.
-func validateArgumentName(name string) error {
-	if name == "" {
-		return errors.New("cli: Argument.Name must not be empty")
-	}
-	return nil
-}
 
 // validateArguments checks args for structural problems: an invalid
 // Argument (see Argument.validate) or a duplicate Name. It is a free function (not a *Command method) so it

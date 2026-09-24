@@ -28,8 +28,6 @@ type Option interface {
 	name() string
 	help() string
 	env() string
-	set(s string) error // see Argument.set
-	setDefault()        // see Argument.setDefault
 	flag() string
 	long() string
 	action() Action
@@ -39,6 +37,9 @@ type Option interface {
 	// malformed Flag. Cross-item rules (uniqueness of Flag, Long and
 	// name()) stay in validateOptions.
 	validate() error
+
+	set(s string) error // see Argument.set
+	setDefault()        // see Argument.setDefault
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, first
@@ -60,7 +61,7 @@ func normalizeDashes(s string, dashes int) string {
 // optionName returns the identifier of an Option: name when set,
 // otherwise long without its leading "--", otherwise flag without its
 // leading "-". flag and long are expected in normalized form (see
-// normalizeDashes). validateOptions guarantees at least one of the two
+// normalizeDashes). optionValidate guarantees at least one of the two
 // is set, so the result is never empty for a validated Option. Shared
 // by every Option implementation's name() method.
 func optionName(name, flag, long string) string {
@@ -72,6 +73,28 @@ func optionName(name, flag, long string) string {
 	default:
 		return strings.TrimPrefix(flag, "-")
 	}
+}
+
+// optionValidate is the base behavior behind every Option
+// implementation's validate() method (the closest thing Go has to a
+// parent-class call: a concrete type's validate() calls it first, then
+// adds any rule of its own). It checks the normalized flag() and
+// long() forms, and never calls o.validate() itself.
+func optionValidate(o Option) error {
+	flag, long := o.flag(), o.long()
+
+	// An Option needs at least one of Flag/Long to be reachable from
+	// the command line at all.
+	if flag == "" && long == "" {
+		return errors.New("cli: Option must set Flag and/or Long")
+	}
+
+	// The short form's fixed length ("-x") is what lets help output use
+	// a constant-width Flag column instead of computing one per Command.
+	if flag != "" && len(flag) != 2 {
+		return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
+	}
+	return nil
 }
 
 // --- StringOption ------------------------------------------------------------
@@ -140,9 +163,13 @@ type StringOption struct {
 	Action Action
 }
 
-func (o *StringOption) name() string { return optionName(o.Name, o.flag(), o.long()) }
-func (o *StringOption) help() string { return o.Help }
-func (o *StringOption) env() string  { return o.Env }
+func (o *StringOption) name() string    { return optionName(o.Name, o.flag(), o.long()) }
+func (o *StringOption) help() string    { return o.Help }
+func (o *StringOption) flag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *StringOption) long() string    { return normalizeDashes(o.Long, 2) }
+func (o *StringOption) env() string     { return o.Env }
+func (o *StringOption) action() Action  { return o.Action }
+func (o *StringOption) validate() error { return optionValidate(o) }
 
 func (o *StringOption) set(s string) error {
 	if o.Dest != nil {
@@ -156,11 +183,6 @@ func (o *StringOption) setDefault() {
 		*o.Dest = o.Default
 	}
 }
-
-func (o *StringOption) flag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *StringOption) long() string    { return normalizeDashes(o.Long, 2) }
-func (o *StringOption) action() Action  { return o.Action }
-func (o *StringOption) validate() error { return validateOptionForms(o.flag(), o.long()) }
 
 // --- IntOption ---------------------------------------------------------------
 
@@ -197,9 +219,13 @@ type IntOption struct {
 	Action Action
 }
 
-func (o *IntOption) name() string { return optionName(o.Name, o.flag(), o.long()) }
-func (o *IntOption) help() string { return o.Help }
-func (o *IntOption) env() string  { return o.Env }
+func (o *IntOption) name() string    { return optionName(o.Name, o.flag(), o.long()) }
+func (o *IntOption) help() string    { return o.Help }
+func (o *IntOption) flag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *IntOption) long() string    { return normalizeDashes(o.Long, 2) }
+func (o *IntOption) env() string     { return o.Env }
+func (o *IntOption) action() Action  { return o.Action }
+func (o *IntOption) validate() error { return optionValidate(o) }
 
 func (o *IntOption) set(s string) error {
 	if o.Dest == nil {
@@ -218,11 +244,6 @@ func (o *IntOption) setDefault() {
 		*o.Dest = o.Default
 	}
 }
-
-func (o *IntOption) flag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *IntOption) long() string    { return normalizeDashes(o.Long, 2) }
-func (o *IntOption) action() Action  { return o.Action }
-func (o *IntOption) validate() error { return validateOptionForms(o.flag(), o.long()) }
 
 // --- BoolOption --------------------------------------------------------------
 
@@ -258,9 +279,13 @@ type BoolOption struct {
 	Action Action
 }
 
-func (o *BoolOption) name() string { return optionName(o.Name, o.flag(), o.long()) }
-func (o *BoolOption) help() string { return o.Help }
-func (o *BoolOption) env() string  { return o.Env }
+func (o *BoolOption) name() string    { return optionName(o.Name, o.flag(), o.long()) }
+func (o *BoolOption) help() string    { return o.Help }
+func (o *BoolOption) flag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *BoolOption) long() string    { return normalizeDashes(o.Long, 2) }
+func (o *BoolOption) env() string     { return o.Env }
+func (o *BoolOption) action() Action  { return o.Action }
+func (o *BoolOption) validate() error { return optionValidate(o) }
 
 func (o *BoolOption) set(s string) error {
 	if o.Dest == nil {
@@ -279,11 +304,6 @@ func (o *BoolOption) setDefault() {
 		*o.Dest = o.Default
 	}
 }
-
-func (o *BoolOption) flag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *BoolOption) long() string    { return normalizeDashes(o.Long, 2) }
-func (o *BoolOption) action() Action  { return o.Action }
-func (o *BoolOption) validate() error { return validateOptionForms(o.flag(), o.long()) }
 
 // --- Action ------------------------------------------------------------------
 
@@ -333,24 +353,6 @@ func (o *BoolOption) validate() error { return validateOptionForms(o.flag(), o.l
 type Action func(c *Command, opt Option, value string) *Error
 
 // --- Validate ----------------------------------------------------------------
-
-// validateOptionForms is the per-item rule shared by every Option
-// implementation's validate() method. flag and long are expected in
-// normalized form (see normalizeDashes).
-func validateOptionForms(flag, long string) error {
-	// An Option needs at least one of Flag/Long to be reachable from
-	// the command line at all.
-	if flag == "" && long == "" {
-		return errors.New("cli: Option must set Flag and/or Long")
-	}
-
-	// The short form's fixed length ("-x") is what lets help output use
-	// a constant-width Flag column instead of computing one per Command.
-	if flag != "" && len(flag) != 2 {
-		return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
-	}
-	return nil
-}
 
 // validateOptions checks opts for structural problems: an invalid Option
 // (see Option.validate: a missing Flag/Long or a malformed Flag), a
