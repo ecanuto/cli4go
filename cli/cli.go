@@ -49,15 +49,15 @@ type item interface {
 }
 
 // Command describes a complete command-line interface: its identity
-// (Name/Version/Description), its positional Arguments, and its Options
-// (flags). A Command is plain data — build it as a struct literal, then
-// call Parse to read os.Args into the bound variables.
+// (Name/Version/Description), its positional Arguments, its Options
+// (flags), and its standalone EnvVars. A Command is plain data — build
+// it as a struct literal, then call Parse to read os.Args into the
+// bound variables.
 //
-// Program is an alias for Command, kept as the conventional name for the
-// common single-command case (a CLI with no subcommands). The two are
-// identical to the compiler. There is currently no mechanism for
-// declaring subcommands; a future Commands field and its routing design
-// are still being worked out.
+// Program is an alias for Command, the conventional name for the common
+// single-command case (a CLI with no subcommands). The two are
+// identical to the compiler. There is no mechanism for declaring
+// subcommands.
 type Command struct {
 	// Name is the program's name, shown in usage and version output.
 	Name string
@@ -116,30 +116,21 @@ func (c *Command) stderr() io.Writer {
 	return os.Stderr
 }
 
-// options returns a generator function that yields every Option in
-// the Command, including the built-in -h/--help and -v/--version entries.
-// The generator yields user-declared Options first, then the built-in
-// entries last. The generator stops yielding when yield returns false.
+// options yields every Option of the Command: the user-declared ones
+// first, then the built-in -h/--help and, when Version is set,
+// -v/--version.
 //
-// A built-in entry is suppressed entirely -- not yielded at all --
-// when the user-declared Options already claim both of its normalized
-// forms. The two forms may be claimed by a single Option or by two
-// different ones; only the set of claimed forms matters. Suppression
-// is per built-in, not per form: claiming only
-// -h (and not --help) does NOT suppress the help built-in, it
-// collides with it, and validateOptions rejects that collision as a
-// duplicate flag. Claiming both -h and --help, on the other hand,
-// suppresses the help built-in cleanly -- the user's declaration
-// wins, and there is no duplicate to reject. The same rule applies
-// to -v/--version, and only when Version is set.
+// A built-in is suppressed -- not yielded at all -- when the
+// user-declared Options claim both of its normalized forms, on one
+// Option or on two. A partial claim (only -h, or only --help) does not
+// suppress it: it collides, and validateOptions rejects the duplicate.
 //
-// The version built-in has one extra rule: when the user-declared Options
-// claim -v but not --version, the built-in is not a collision. It is
-// yielded with -V as its short form instead, since -v is commonly taken
-// by "verbose" and -v/-V is an established convention. If -V is claimed
-// too, the short form is dropped and only --version is yielded. Help has
-// no such fallback: -H conventionally means "host", so the help built-in
-// is either -h/--help or suppressed.
+// The version built-in has one extra rule: when -v is claimed but not
+// --version, it is yielded with -V as its short form instead (-v is
+// commonly "verbose", and -v/-V is an established convention); if -V is
+// claimed too, only --version is yielded. Help has no such fallback: -H
+// conventionally means "host", so the help built-in is either -h/--help
+// or suppressed.
 func (c *Command) options() iter.Seq[Option] {
 	return func(yield func(Option) bool) {
 		for _, opt := range c.Options {
@@ -148,25 +139,15 @@ func (c *Command) options() iter.Seq[Option] {
 			}
 		}
 
-		// -h/--help and -v/--version must never consume a following
-		// token -- each is declared as a *BoolOption below, which is
-		// what opts it out (see the value-determination comment in
-		// Parse): an Option with an Action but no Dest otherwise
-		// defaults to consuming a value, and being a *BoolOption is
-		// what says otherwise, built-in or not, independent of Dest.
-		// Each built-in still binds Dest to a throwaway bool anyway, so
-		// set has somewhere to write "true" (Dest resolves before
-		// Action -- see the Action doc comment); discard itself is
-		// never read, since neither built-in has any value of its own
-		// to store.
+		// Each built-in is a *BoolOption, which is what keeps it from
+		// consuming a following token (see Parse's value
+		// determination), with a throwaway Dest so set has somewhere to
+		// write "true" before its Action runs. discard is never read.
 		var discard bool
 
-		// Which normalized Flag/Long forms the user-declared Options
-		// claim, so the suppression/fallback rules below can be
-		// decided per built-in. "Taken" is per-token: a form counts
-		// whether or not the Option claiming it also declares the
-		// other form, and whether or not both of a built-in's forms
-		// come from the same Option -- see the doc comment above.
+		// The normalized Flag/Long forms the user-declared Options
+		// claim, whichever Option claims them and whatever else it
+		// declares.
 		takenFlags := make(map[string]bool, len(c.Options))
 		takenLongs := make(map[string]bool, len(c.Options))
 		for _, opt := range c.Options {
@@ -178,10 +159,9 @@ func (c *Command) options() iter.Seq[Option] {
 			}
 		}
 
-		// Suppress the help built-in only when the user has claimed
-		// BOTH of its forms. A partial claim (only -h, or only
-		// --help) leaves the built-in intact, and validateOptions
-		// then reports the resulting duplicate.
+		// Suppress the help built-in only when both of its forms are
+		// claimed; a partial claim leaves it intact, and
+		// validateOptions reports the duplicate.
 		if !(takenFlags["-h"] && takenLongs["--help"]) {
 			if !yield(&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Print help",
@@ -196,12 +176,10 @@ func (c *Command) options() iter.Seq[Option] {
 		}
 
 		if c.Version != "" {
-			// -v is overloaded in the wild (verbose vs. version), so when
-			// a user-declared Option already claims it, fall back to -V,
-			// the conventional capital-letter alternative. If -V is taken
-			// too, the short form is dropped and only --version remains.
-			// When --version is claimed as well, both forms are taken and
-			// the built-in is suppressed, exactly as for help.
+			// -v is often taken by "verbose", so a claimed -v falls back
+			// to -V; if -V is taken too the short form is dropped, and if
+			// --version is claimed as well the built-in is suppressed, as
+			// for help.
 			short := "-v"
 			if takenFlags["-v"] {
 				switch {
@@ -291,12 +269,10 @@ func (c *Command) items(scope int) iter.Seq[item] {
 // set neither, either, or both (see Option.Action's doc comment for
 // what setting both means for Parse's dispatch order).
 //
-// A Validate failure never prints anything -- see the package-level
-// design notes for why (a Validate failure is a bug in the caller's Go
-// code, not something an end user mistyped). It always reports
-// ExitCode() == 1 -- see Error.ExitCode's doc comment -- so a caller
-// using Validate on its own (outside Parse) gets the same
-// os.Exit(err.ExitCode()) idiom Parse/DefaultParse already document.
+// A Validate failure never prints anything (it is a bug in the caller's
+// Go code, not something an end user mistyped) and always reports
+// ExitCode() == 1, so a caller using Validate on its own gets the same
+// os.Exit(err.ExitCode()) idiom as Parse/DefaultParse.
 func (c *Command) Validate() *Error {
 	// Command.Name is required: usage, help, and version output use it.
 	if c.Name == "" {
@@ -344,9 +320,9 @@ func (c *Command) Validate() *Error {
 
 // --- Parse -------------------------------------------------------------------
 
-// Parse resolves every Option and Argument from args (typically
-// os.Args[1:]), applying the Default -> Env -> command-line-flag
-// precedence. It also handles the built-in -h/--help flag (always
+// Parse resolves every Argument, Option, and EnvVar from args (typically
+// os.Args[1:]) and the environment, applying the Default -> Env ->
+// command-line-flag precedence. It also handles the built-in -h/--help flag (always
 // available) and the built-in -v/--version flag (available only when
 // Command.Version is set) -- neither is declared in Command.Options by
 // the developer.
@@ -529,21 +505,18 @@ func (c *Command) DefaultParse() *Error {
 
 // ErrorString returns the clap-style error block for a real
 // parsing/usage error: the "error: <message>" line, the usage line (see
-// UsageString), and a pointer to '--help'. Parse uses this internally
-// for every real parsing/usage error (ExitCode() == 2) before returning
-// -- see the Parse doc comment for the exact block layout.
+// UsageString), and a pointer to '--help'. Parse uses it for every real
+// parsing/usage error (ExitCode() == 2); see the Parse doc comment for
+// the exact layout.
 //
 // err is the bare underlying error (e.g. fmt.Errorf("unknown option
-// %q", tok)) -- the "error: " prefix added here is purely for display,
-// mirroring the same rule already documented on Error.Error(): the
-// message stored in the *Error Parse eventually returns is never
-// prefixed with it, so errors.Is/errors.As and any caller-side wrapping
-// keep working against the bare message.
+// %q", tok)). The "error: " prefix is display-only: the message stored
+// in the *Error Parse returns is never prefixed with it, so
+// errors.Is/errors.As and any caller-side wrapping keep working against
+// the bare message.
 //
-// Exported for the same reason PrintUsage is: it remains available as a
-// small standalone convenience for a caller's own post-Parse validation
-// (e.g. a future cross-field check) that wants the same clap-style
-// formatting for its own errors.
+// It is exported, like PrintUsage, as a standalone convenience for a
+// caller's own post-Parse validation that wants the same formatting.
 func (c *Command) ErrorString(err error) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "error: %v\n", err)
@@ -553,29 +526,21 @@ func (c *Command) ErrorString(err error) string {
 }
 
 // PrintErrorf formats err per format/args -- exactly like fmt.Errorf,
-// including %w to wrap an underlying error -- writes ErrorString of
-// the result to c.Stderr (os.Stderr by default), and returns the
-// *Error the caller should return in turn. Unlike
-// PrintUsage/PrintHelp/PrintVersion -- which always write to Stdout
-// and return nothing -- PrintErrorf writes to Stderr and returns a
-// value, because formatting the error, printing the block, and
-// building the *Error to return are the same step at every call site:
-// every clap-style error block this package ever prints represents a
-// real parsing/usage error, so the exit code is always 2 (see
-// Error.ExitCode's doc comment) -- there is no code-1 or code-0 case
-// that goes through PrintErrorf.
+// including %w to wrap an underlying error -- writes ErrorString of the
+// result to c.Stderr (os.Stderr by default), and returns the *Error the
+// caller should return in turn. Unlike PrintUsage/PrintHelp/
+// PrintVersion, which write to Stdout and return nothing, it writes to
+// Stderr and returns a value: formatting the error, printing the block,
+// and building the *Error are the same step at every call site, and
+// every block this package prints is a real parsing/usage error, so the
+// exit code is always 2 (see Error.ExitCode's doc comment).
 //
-// The "f" suffix matters beyond naming convention: it is what lets
-// `go vet`'s printf checker recognize format/args here and catch a
-// mismatched verb -- e.g. %w only wraps inside fmt.Errorf/PrintErrorf;
-// used with a plain fmt.Sprintf-based helper (no "f" suffix) it just
-// prints as an unrecognized verb instead of wrapping the error.
+// The "f" suffix is what lets `go vet`'s printf checker recognize
+// format/args here and catch a mismatched verb.
 //
-// A caller that already holds a plain error rather than building one
-// here can still use PrintErrorf -- pass it through with "%s", err,
-// the same way Validate's own failure is wrapped into a *Error via
-// newError(1, "%s", err). A caller-declared Option's Action is a
-// caller too, in exactly this sense -- see the Action doc comment.
+// A caller holding a plain error can pass it through with "%s", err. A
+// user-declared Option's Action is such a caller; see the Action doc
+// comment.
 func (c *Command) PrintErrorf(format string, args ...any) *Error {
 	err := fmt.Errorf(format, args...)
 	fmt.Fprint(c.stderr(), c.ErrorString(err))
@@ -617,21 +582,20 @@ func (c *Command) PrintUsage() {
 // UsageString), the description (if set), and the Arguments / Options /
 // Environment Variables sections.
 //
-// Arguments is omitted entirely when there are no Arguments.
-// Environment Variables is omitted when no Option or Argument declares
-// an Env name. Options is never omitted -- it always contains at least
-// the synthesized -h/--help entry (unless the user-declared Options
-// claim both of its forms -- see options' doc comment), plus
-// -v/--version when Version is set, both always listed last.
+// Arguments is omitted entirely when there are no Arguments, and
+// Environment Variables when nothing declares an environment variable
+// (no Argument or Option Env, and no EnvVars). Options is never omitted:
+// it always contains at least the synthesized -h/--help entry (unless
+// the user-declared Options claim both of its forms -- see options' doc
+// comment), plus -v/--version when Version is set, both listed last.
 func (c *Command) HelpString() string {
 	var b strings.Builder
 
-	// Compute the shared column width: the longest Argument.Name, and the
+	// Compute the shared column width from the longest Argument.Name, the
 	// longest normalized long flag (e.g. "--bar") plus 4 characters for the
-	// "-x, " short flag column an Option row has but an Argument row doesn't.
-	// The two are computed separately (rather than folded into one loop) so a
-	// future per-section alignment mode only needs to change how they're
-	// combined below, not how each is computed.
+	// "-x, " short flag column an Option row has but an Argument row
+	// doesn't, and the longest environment variable name. Each is computed
+	// on its own and combined below.
 	widthArgs := 0
 	for _, arg := range c.Arguments {
 		w := len(arg.name())

@@ -45,12 +45,9 @@ func (e *Error) Error() string { return e.msg }
 //	     specifically for command-line usage errors.
 func (e *Error) ExitCode() int { return e.code }
 
-// Is lets errors.Is(err, ErrExit) keep working: an Error classifies as
-// ErrExit only when its ExitCode is 0 (i.e. only ErrHelp/ErrVersion).
-// The e.code == 0 guard matters -- without it, a real parsing/usage
-// error or a Validate failure would also incorrectly satisfy
-// errors.Is(err, ErrExit), since Is would then only be checking which
-// error was asked for, not which instance it's being called on.
+// Is makes errors.Is(err, ErrExit) true for an Error whose ExitCode is
+// 0 (only ErrHelp and ErrVersion). The e.code == 0 guard keeps a real
+// parsing/usage error or a Validate failure from satisfying it too.
 func (e *Error) Is(target error) bool { return e.code == 0 && target == ErrExit }
 
 var (

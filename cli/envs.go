@@ -12,11 +12,10 @@ import (
 // command-line token -- so its value precedence is just Env, then
 // Default, with no flag position to override it.
 //
-// EnvVar is implemented by a family of typed structs -- StringEnvVar
-// today -- with the same shape as Argument and Option, and for the same
-// reason: each concrete type owns its Dest and Default as its own Go
-// type, so there is nothing to type-check at runtime. See Argument's
-// doc comment.
+// EnvVar is implemented by typed structs (StringEnvVar) with the same
+// shape as Argument and Option, and for the same reason: each concrete
+// type owns its Dest and Default as its own Go type, so there is
+// nothing to type-check at runtime. See Argument's doc comment.
 type EnvVar interface {
 	item
 }

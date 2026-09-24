@@ -30,9 +30,9 @@ type Argument interface {
 // argumentValidate is the base behavior behind every Argument
 // implementation's validate() method (the closest thing Go has to a
 // parent-class call: a concrete type's validate() calls it first, then
-// adds any rule of its own): every Argument needs a display name --
-// it's what shows up in the usage line (e.g. "[qux]") and the
-// Arguments: help section. It never calls a.validate() itself.
+// adds any rule of its own): every Argument needs a display name, which
+// shows in the usage line and the "Arguments:" help section. It never
+// calls a.validate().
 func argumentValidate(a Argument) error {
 	if a.name() == "" {
 		return errors.New("cli: Argument.Name must not be empty")
@@ -58,11 +58,9 @@ type StringArgument struct {
 	// &cfg.Qux. Optional.
 	Dest *string
 
-	// Default is shown in the help text as "(default: ...)" and is
-	// assigned to Dest before Env and the command line are considered.
-	// Its zero value ("") applies just like any other value -- there
-	// is no separate "unset" state, the same way a stdlib flag always
-	// has a default, even an empty one.
+	// Default is assigned to Dest when neither the command line nor Env
+	// sets it. Its zero value ("") applies just like any other value --
+	// there is no separate "unset" state.
 	Default string
 
 	// Env, if set, is the environment variable consulted when this

@@ -852,12 +852,10 @@ func TestValidate(t *testing.T) {
 
 // --- Parse -------------------------------------------------------------------
 
-// TestParse covers what Parse itself does today: the Validate wiring
-// (already exercised end-to-end via DefaultParse in TestDefaultParse,
-// not repeated here) and step 2 of the algorithm, Default -> Env
-// resolution, across Arguments, Options, and standalone EnvVars. The
-// token loop (steps 3-5) doesn't exist yet, so every case here passes
-// an empty args slice.
+// TestParse covers Parse's Default -> Env resolution across Arguments,
+// Options, and standalone EnvVars, with an empty args slice. The
+// Validate wiring is exercised end to end via DefaultParse in
+// TestDefaultParse.
 func TestParse(t *testing.T) {
 	t.Run("no default, no env: Dest keeps its zero value", func(t *testing.T) {
 		var s string
@@ -971,10 +969,9 @@ func TestParse(t *testing.T) {
 	})
 }
 
-// TestParse_TokenLoop covers step 3-5 of the Parse algorithm: the
-// actual token loop, resolving Options (built-in and user-declared
-// alike, through the same flagOpts/longOpts lookup) and positional
-// Arguments from a real args slice.
+// TestParse_TokenLoop covers Parse's token loop: resolving Options
+// (built-in and user-declared alike, through the same lookup) and
+// positional Arguments from a real args slice.
 func TestParse_TokenLoop(t *testing.T) {
 	t.Run("-h prints help and returns ErrHelp", func(t *testing.T) {
 		var buf bytes.Buffer

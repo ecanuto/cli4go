@@ -13,15 +13,11 @@ import (
 // appear in any order on the command line.
 //
 // Option is implemented by a family of typed structs -- StringOption,
-// IntOption, and BoolOption -- rather than by one struct carrying a
-// Dest/Default pair whose concrete type has to be inferred at runtime.
-// See Argument's doc comment for the same reasoning applied there.
-//
-// The interface itself is unexported-method-only: a concrete type keeps
-// its fields public (Name, Flag, Long, ...) for struct-literal
-// construction, and satisfies Option through small unexported accessor
-// methods with different names from the fields they read, so field and
-// method never collide.
+// IntOption, and BoolOption -- each owning its Dest and Default as its
+// own Go type; see Argument's doc comment. The interface itself is
+// unexported-method-only: a concrete type keeps its fields public for
+// struct-literal construction and satisfies Option through small
+// unexported accessor methods, so field and method never collide.
 type Option interface {
 	item
 	flag() string
@@ -29,15 +25,11 @@ type Option interface {
 	action() Action
 }
 
-// normalizeDashes returns s with exactly dashes leading dashes, first
-// stripping whatever dashes s already has -- the shared rule behind
-// both a Flag ("f", "-f", "--f" -> "-f" with dashes=1) and a Long
-// ("bar", "-bar", "--bar", "---bar" -> "--bar" with dashes=2). A single
-// leading dash on what's meant to be a Long is treated the same as no
-// dash at all, so "-bar" (a likely typo) is normalized rather than
-// rejected. Idempotent on an already-normalized or empty s. Shared by
-// every Option implementation's flag()/long() methods, so the
-// normalization rule only lives in one place.
+// normalizeDashes returns s with exactly dashes leading dashes, whatever
+// it had before: the rule behind both a Flag ("f", "-f", "--f" -> "-f")
+// and a Long ("bar", "-bar", "---bar" -> "--bar"). A single dash on a
+// Long is a likely typo, so it is normalized rather than rejected. An
+// empty s stays empty.
 func normalizeDashes(s string, dashes int) string {
 	if s == "" {
 		return s
@@ -46,11 +38,10 @@ func normalizeDashes(s string, dashes int) string {
 }
 
 // optionName returns the identifier of an Option: name when set,
-// otherwise long without its leading "--", otherwise flag without its
-// leading "-". flag and long are expected in normalized form (see
-// normalizeDashes). optionValidate guarantees at least one of the two
-// is set, so the result is never empty for a validated Option. Shared
-// by every Option implementation's name() method.
+// otherwise long without its "--", otherwise flag without its "-". flag
+// and long are expected normalized (see normalizeDashes); optionValidate
+// guarantees one of them is set, so a validated Option's name is never
+// empty.
 func optionName(name, flag, long string) string {
 	switch {
 	case name != "":
@@ -63,10 +54,8 @@ func optionName(name, flag, long string) string {
 }
 
 // optionValidate is the base behavior behind every Option
-// implementation's validate() method (the closest thing Go has to a
-// parent-class call: a concrete type's validate() calls it first, then
-// adds any rule of its own). It checks the normalized flag() and
-// long() forms, and never calls o.validate() itself.
+// implementation's validate() method (see argumentValidate): it checks
+// the normalized flag() and long() forms, and never calls o.validate().
 func optionValidate(o Option) error {
 	flag, long := o.flag(), o.long()
 
@@ -90,36 +79,26 @@ func optionValidate(o Option) error {
 // implementation for the common case of a flag whose value is just the
 // token as typed, with no conversion.
 type StringOption struct {
-	// Name is an optional, stable identifier for this Option, decoupled
-	// from Flag/Long. It exists for two purposes: as the preferred
-	// source for the generated help placeholder (e.g. "<BAR>", falling
-	// back to Long then Flag when Name is unset), and, in a future
-	// bind/AutoBind feature, as the key used to match this Option
-	// against a config struct field -- something Flag/Long ("-b",
-	// "--bar") are not well suited for, since they're user-facing
-	// display text rather than a stable identity.
+	// Name is an optional identifier, decoupled from Flag/Long. It is
+	// the Option's name(); when unset, that is Long, else Flag, without
+	// its dashes. Validate requires it to be unique across every
+	// Argument, Option, and EnvVar.
 	Name string
 
-	// Flag is the short flag form, e.g. "f" or "-f" -- the leading dash
-	// is optional and added automatically if omitted. Optional field.
+	// Flag is the short form, e.g. "f" or "-f" (the dash is added when
+	// omitted). Optional.
 	//
-	// Declaring both this and the matching Long form of a built-in
-	// (-h and --help, or -v and --version), whether on one Option or
-	// split across several, suppresses that built-in entry from the
-	// generated help and from Parse's dispatch; declaring only one of
-	// the two forms is a conflict, rejected by Validate. The one
-	// exception is -v: declaring it without --version makes the
-	// version built-in use -V instead. See options' doc comment.
+	// Claiming both forms of a built-in (-h and --help, or -v and
+	// --version), on one Option or several, suppresses that built-in
+	// from the help and from Parse's dispatch; claiming only one form is
+	// a conflict, rejected by Validate. The exception is -v alone, which
+	// makes the version built-in use -V. See options' doc comment.
 	Flag string
 
-	// Long is the long flag form, e.g. "bar" or "--bar" -- the leading "--"
-	// is optional and added automatically if omitted. Optional, though at
-	// least one of Flag/Long should be set.
-	//
-	// See Flag's doc comment for how declaring a built-in's forms
-	// affects that built-in. In particular, declaring "--version"
-	// while leaving "-v" free is a conflict, not a fallback: only a
-	// claimed "-v" makes the version built-in switch to "-V".
+	// Long is the long form, e.g. "bar" or "--bar" (the "--" is added
+	// when omitted). Optional, though at least one of Flag/Long must be
+	// set. See Flag for how claiming a built-in's forms affects it; note
+	// that "--version" without "-v" is a conflict, not a fallback.
 	Long string
 
 	// Help explains what the option does. Shown in the generated
@@ -131,11 +110,9 @@ type StringOption struct {
 	// doc comment for the exact resolution order.
 	Dest *string
 
-	// Default is shown in the help text as "(default: ...)" and is
-	// assigned to Dest before Env and the command line are considered.
-	// Its zero value ("") applies just like any other value -- there
-	// is no separate "unset" state, the same way a stdlib flag always
-	// has a default, even an empty one.
+	// Default is assigned to Dest when neither the command line nor Env
+	// sets it. Its zero value ("") applies just like any other value --
+	// there is no separate "unset" state.
 	Default string
 
 	// Env, if set, is the environment variable consulted when this
@@ -250,47 +227,32 @@ func (o *BoolOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
 
 // Action is a hook that runs when its Option's flag is seen on the
 // command line. Parse calls it as opt.action()(c, opt, value): c is
-// the Command being parsed (so an Action can call
-// c.PrintHelp/c.PrintVersion/c.PrintErrorf, exactly like Parse itself
-// does), opt is the matched Option itself (so an Action can refer back
-// to its own declared fields by asserting it to its concrete type,
-// e.g. opt.(*StringOption).Flag, or by calling the small set of
-// unexported accessor methods available to code inside this package),
-// and value is the same string Parse would hand (or just handed) to
-// the Option's set method: the token consumed from the command line by default, or
-// "true" for a flag that opts out of consuming one -- see Dest's doc
-// comment and BoolOption's; an Action-only Option (no Dest at all)
-// still consumes a value by default, exactly like any other flag,
-// unless it is declared as a *BoolOption -- the type itself is what
-// opts it out, not anything about its Dest (a BoolOption can still
-// leave Dest nil and rely on Action alone).
+// the Command being parsed (so an Action can call c.PrintHelp,
+// c.PrintVersion, or c.PrintErrorf, as Parse itself does), opt is the
+// matched Option (assert it to its concrete type, e.g.
+// opt.(*StringOption).Flag, to read its declared fields), and value is
+// the string Parse hands to the Option's set method: the token consumed
+// from the command line, or "true" for a *BoolOption, which never
+// consumes one. Any other Option, including an Action-only one with no
+// Dest, consumes a value by default -- it is the type, not the Dest,
+// that opts out.
 //
 // An Option may set Dest, Action, both, or neither. When both are set,
-// Dest resolves first -- Action only runs if set succeeded, and
-// sees the exact same value Dest was just given, so it never needs to
-// re-derive or re-parse anything Dest already handled.
+// Dest resolves first; Action runs only if that succeeded, and sees
+// the same value Dest was just given.
 //
 // An Action's return value tells Parse whether to keep going:
 //
-//	nil              -- parsing continues, exactly as if this were an
-//	                    ordinary Option with no Action.
-//	a non-nil *Error -- parsing stops immediately; Parse returns this
-//	                    *Error as-is, unchanged.
+//	nil              -- parsing continues, as for an ordinary Option.
+//	a non-nil *Error -- parsing stops; Parse returns it unchanged.
 //
-// This is the same contract PrintErrorf/ErrHelp/ErrVersion already
-// follow, so an Action reports a real parsing/usage error the same way
-// the rest of Parse does -- `return c.PrintErrorf("...", ...)` prints
-// the clap-style block and returns the *Error to return -- and is free
-// to return ErrHelp, ErrVersion, or any other *Error (e.g. built with
-// newError) if that's the exit behavior it wants. This is how the
-// built-in -h/--help and -v/--version flags get their behavior (see
-// options): each is a BoolOption with Dest bound to a throwaway bool
-// (never consuming a token, value always "true") and Action set to a
-// closure that prints and returns ErrHelp/ErrVersion. A caller-declared
-// Option can set its own Action exactly the same way, with no special
-// status over the built-in ones -- optionally alongside a Dest of its
-// own, and opting out of consuming a value the exact same way the
-// built-ins do.
+// This is the contract PrintErrorf/ErrHelp/ErrVersion already follow:
+// an Action reports a usage error with `return c.PrintErrorf(...)`, and
+// may return ErrHelp, ErrVersion, or any other *Error. It is how the
+// built-in -h/--help and -v/--version get their behavior (see options):
+// each is a *BoolOption with a throwaway Dest and an Action that prints
+// and returns ErrHelp/ErrVersion. A user-declared Option can do the
+// same, with no special status for the built-ins.
 type Action func(c *Command, opt Option, value string) *Error
 
 // --- Validate ----------------------------------------------------------------

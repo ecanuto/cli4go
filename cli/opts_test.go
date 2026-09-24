@@ -35,7 +35,7 @@ func TestOptionLong(t *testing.T) {
 		{input: "bar", want: "--bar"},
 		{input: "-bar", want: "--bar"},
 		{input: "--bar", want: "--bar"},
-		{input: "---bar", want: "--bar"}, // documented quirk: kept from the old test
+		{input: "---bar", want: "--bar"}, // extra leading dashes are all stripped
 	}
 
 	for _, tt := range tests {
