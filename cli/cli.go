@@ -228,22 +228,14 @@ func (c *Command) options() iter.Seq[Option] {
 
 // Values for items' scope parameter.
 const (
-	// declaredOnly limits items to what the developer declared on the
-	// Command: Arguments, Options, and EnvVars.
-	declaredOnly = iota
-
-	// withBuiltins also yields the built-in -h/--help and -v/--version
-	// Options that options() synthesizes, in the Options position.
-	withBuiltins
+	declaredOnly = iota // Arguments, Options, and EnvVars as declared
+	withBuiltins        // ... plus the built-in Options options() synthesizes
 )
 
-// items returns a generator function that yields every declared
-// Argument, in declaration order, followed by every Option and then
-// every EnvVar -- the three families as one sequence of item, for the
-// steps that treat them alike. With declaredOnly the Options are the
-// user-declared ones; with withBuiltins they are the effective set
-// (options()), the built-ins included after the user-declared ones. The
-// generator stops yielding when yield returns false.
+// items yields every Argument, then every Option, then every EnvVar,
+// each in declaration order -- the three families as one sequence of
+// item. With withBuiltins the Options are the effective set (options()),
+// the built-ins last; with declaredOnly, just the user-declared ones.
 func (c *Command) items(scope int) iter.Seq[item] {
 	return func(yield func(item) bool) {
 		for _, arg := range c.Arguments {
@@ -283,24 +275,17 @@ func (c *Command) items(scope int) iter.Seq[item] {
 //
 // Checks, in order:
 //  1. Command.Name non-empty.
-//  2. A built-in (-h/--help, -v/--version) whose both normalized forms
-//     are claimed by the user-declared Options is suppressed, not
-//     yielded by options(). The version built-in also falls back to
-//     -V (or to --version alone) when -v is claimed without
-//     --version; see options' doc comment.
-//  3. Normalized Flag and Long are each unique across the effective
-//     Option set (options() -- user-declared Options plus whichever
-//     built-ins survived suppression), so a partial claim on a
-//     built-in's forms is rejected as a real conflict.
-//  4. Then, for every item in order -- Arguments, the effective
-//     Options, then EnvVars -- its own structure: Argument.Name and
-//     EnvVar.Name non-empty, and every Option with a Flag and/or Long,
-//     a normalized Flag being exactly 2 characters.
-//  5. Every environment variable name -- from Arguments' Env, Options'
-//     Env, and EnvVars -- is unique across all three.
-//  6. Every item's name() -- Name, else for an Option Long/Flag
-//     without its dashes -- is unique across all three families and
-//     the built-ins, since a name identifies exactly one item.
+//  2. Normalized Flag and Long unique across the effective Option set
+//     (options(): the user-declared Options plus the built-ins that
+//     survive suppression), so a partial claim on a built-in's forms is
+//     a conflict; see options' doc comment.
+//  3. For every item -- Arguments, effective Options, then EnvVars --
+//     its own structure: Argument.Name and EnvVar.Name non-empty, an
+//     Option with a Flag and/or Long, a Flag exactly 2 characters.
+//  4. Environment variable names (Arguments' Env, Options' Env, and
+//     EnvVars) unique across all three families, and every item's
+//     name() (an Option's defaults to Long/Flag without its dashes)
+//     unique across all of them, since a name identifies one item.
 //
 // Dest and Action are not checked against each other -- an Option may
 // set neither, either, or both (see Option.Action's doc comment for
@@ -313,29 +298,23 @@ func (c *Command) items(scope int) iter.Seq[item] {
 // using Validate on its own (outside Parse) gets the same
 // os.Exit(err.ExitCode()) idiom Parse/DefaultParse already document.
 func (c *Command) Validate() *Error {
-	// Command.Name is required -- it's used in usage/help/version output.
-	// This check has nowhere else to live: it isn't about any one item,
-	// so it stays here rather than in the item pass below.
+	// Command.Name is required: usage, help, and version output use it.
 	if c.Name == "" {
 		return newError(1, "cli: Command.Name must not be empty")
 	}
 
-	// Flag/Long uniqueness runs against the effective Option set --
-	// c.options(), not c.Options -- so a user-declared Option that
-	// collides with a synthesized built-in (a partial claim on -h or
-	// --help, say) is caught here exactly like any other duplicate
-	// flag. See options' doc comment for the suppression rule. It runs
-	// before the item pass so a shared Flag is reported as such, not as
-	// the duplicate name the two Options also derive.
+	// Flag/Long uniqueness runs over the effective Option set, so a
+	// user-declared Option colliding with a built-in is caught like any
+	// other duplicate. It runs first so a shared Flag is reported as
+	// such, not as the duplicate name the two Options also derive.
 	if err := validateOptions(slices.Collect(c.options())); err != nil {
 		return newError(1, "%s", err)
 	}
 
-	// One pass over every item, the built-ins included: its own
-	// structure, then the two uniqueness rules that cross families.
-	// The environment variable is checked before the name so that
-	// two EnvVars sharing a name (which is also their environment
-	// variable) are reported as a duplicate environment variable.
+	// One pass over every item, built-ins included: its own structure,
+	// then the uniqueness rules that cross families. The environment
+	// variable is checked first so two EnvVars sharing a name (also
+	// their variable) report as a duplicate environment variable.
 	names := make(map[string]bool)
 	envs := make(map[string]bool)
 	for it := range c.items(withBuiltins) {
@@ -350,10 +329,9 @@ func (c *Command) Validate() *Error {
 			envs[env] = true
 		}
 
-		// A name identifies exactly one item, whatever its family, so
-		// it can be looked up unambiguously. An Option without a Name
-		// derives one from Long/Flag, which can collide with an
-		// Argument's Name; an explicit Name settles it.
+		// A name identifies exactly one item, so it can be looked up
+		// unambiguously. An Option's derived name can collide with an
+		// Argument's; an explicit Name settles it.
 		name := it.name()
 		if names[name] {
 			return newError(1, "cli: duplicate name %q; set an explicit Name on one of them", name)
