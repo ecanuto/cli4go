@@ -771,7 +771,7 @@ func (c *Command) HelpString() string {
 		}
 		fmt.Fprintf(&b,
 			"  %-3s %-*s   %s\n",
-			flag, width-4, opt.long(), opt.help(), // 4 = len("-x, ")
+			flag, width-4, long, opt.help(), // 4 = len("-x, ")
 		)
 	}
 
