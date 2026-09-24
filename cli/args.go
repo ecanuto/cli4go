@@ -75,20 +75,9 @@ func (a *StringArgument) name() string { return a.Name }
 func (a *StringArgument) help() string { return a.Help }
 func (a *StringArgument) env() string  { return a.Env }
 
-func (a *StringArgument) validate() error { return argumentValidate(a) }
-
-func (a *StringArgument) set(s string) error {
-	if a.Dest != nil {
-		*a.Dest = s
-	}
-	return nil
-}
-
-func (a *StringArgument) setDefault() {
-	if a.Dest != nil {
-		*a.Dest = a.Default
-	}
-}
+func (a *StringArgument) validate() error    { return argumentValidate(a) }
+func (a *StringArgument) set(s string) error { return setDest(a.Dest, s, parseString) }
+func (a *StringArgument) setDefault()        { setDestDefault(a.Dest, a.Default) }
 
 // --- IntArgument -------------------------------------------------------------
 
@@ -118,25 +107,9 @@ func (a *IntArgument) name() string { return a.Name }
 func (a *IntArgument) help() string { return a.Help }
 func (a *IntArgument) env() string  { return a.Env }
 
-func (a *IntArgument) validate() error { return argumentValidate(a) }
-
-func (a *IntArgument) set(s string) error {
-	if a.Dest == nil {
-		return nil
-	}
-	n, err := parseInt(s)
-	if err != nil {
-		return err
-	}
-	*a.Dest = n
-	return nil
-}
-
-func (a *IntArgument) setDefault() {
-	if a.Dest != nil {
-		*a.Dest = a.Default
-	}
-}
+func (a *IntArgument) validate() error    { return argumentValidate(a) }
+func (a *IntArgument) set(s string) error { return setDest(a.Dest, s, parseInt) }
+func (a *IntArgument) setDefault()        { setDestDefault(a.Dest, a.Default) }
 
 // --- Validate ----------------------------------------------------------------
 

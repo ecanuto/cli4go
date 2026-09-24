@@ -4,6 +4,15 @@ import (
 	"testing"
 )
 
+func TestParseString(t *testing.T) {
+	for _, in := range []string{"", "hello", "--not-a-flag"} {
+		got, err := parseString(in)
+		if err != nil || got != in {
+			t.Errorf("parseString(%q) = %q, %v; want %q, nil", in, got, err, in)
+		}
+	}
+}
+
 func TestParseInt(t *testing.T) {
 	tests := []struct {
 		input   string

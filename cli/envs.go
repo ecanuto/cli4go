@@ -59,17 +59,6 @@ func (e *StringEnvVar) name() string { return e.Name }
 func (e *StringEnvVar) help() string { return e.Help }
 func (e *StringEnvVar) env() string  { return e.Name }
 
-func (e *StringEnvVar) validate() error { return envVarValidate(e) }
-
-func (e *StringEnvVar) set(s string) error {
-	if e.Dest != nil {
-		*e.Dest = s
-	}
-	return nil
-}
-
-func (e *StringEnvVar) setDefault() {
-	if e.Dest != nil {
-		*e.Dest = e.Default
-	}
-}
+func (e *StringEnvVar) validate() error    { return envVarValidate(e) }
+func (e *StringEnvVar) set(s string) error { return setDest(e.Dest, s, parseString) }
+func (e *StringEnvVar) setDefault()        { setDestDefault(e.Dest, e.Default) }
