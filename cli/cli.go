@@ -44,7 +44,7 @@ type Command struct {
 
 	// EnvVars are standalone environment variables -- not bound to any
 	// Argument or Option -- shown in the generated "Environment
-	// Variables:" help section. allEnvVars yields Arguments' Env entries
+	// Variables:" help section, which lists Arguments' Env entries
 	// first, then Options', then EnvVars, in that order.
 	EnvVars []EnvVar
 
@@ -249,25 +249,6 @@ func (c *Command) items() iter.Seq[item] {
 		for _, env := range c.EnvVars {
 			if !yield(env) {
 				return
-			}
-		}
-	}
-}
-
-// allEnvVars returns a generator function that yields every item in the
-// Command that declares an environment variable (env() != ""): first
-// the Arguments, then the Options, then the EnvVars, in that order. The
-// generator stops yielding when yield returns false.
-//
-// It exists for HelpString, its only caller, which reads each item's
-// env() and help().
-func (c *Command) allEnvVars() iter.Seq[item] {
-	return func(yield func(item) bool) {
-		for it := range c.items() {
-			if it.env() != "" {
-				if !yield(it) {
-					return
-				}
 			}
 		}
 	}
@@ -648,7 +629,7 @@ func (c *Command) HelpString() string {
 		}
 	}
 	widthEnvs := 0
-	for it := range c.allEnvVars() {
+	for it := range c.items() {
 		w := len(it.env())
 		if w > widthEnvs {
 			widthEnvs = w
@@ -695,7 +676,10 @@ func (c *Command) HelpString() string {
 	// one environment variable
 	if widthEnvs > 0 {
 		fmt.Fprintf(&b, "\nEnvironment Variables:\n")
-		for it := range c.allEnvVars() {
+		for it := range c.items() {
+			if it.env() == "" {
+				continue
+			}
 			fmt.Fprintf(&b, "  %-*s   %s\n", width, it.env(), it.help())
 		}
 	}

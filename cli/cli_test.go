@@ -507,170 +507,6 @@ func TestItems_StopsEarly(t *testing.T) {
 	}
 }
 
-// envPair is what TestAllEnvVars compares: the environment variable
-// name and the help text of each item allEnvVars yields.
-type envPair struct {
-	Name string
-	Help string
-}
-
-func TestAllEnvVars(t *testing.T) {
-	tests := []struct {
-		name string
-		cmd  Command
-		want []envPair
-	}{
-		{
-			name: "no Env declared anywhere",
-			cmd: Command{
-				Name:      "myprogram",
-				Arguments: []Argument{&StringArgument{Name: "qux"}},
-				Options:   []Option{&StringOption{Flag: "-f"}},
-			},
-			want: nil,
-		},
-		{
-			name: "only an Argument declares Env",
-			cmd: Command{
-				Name:      "myprogram",
-				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
-			},
-			want: []envPair{
-				{Name: "PROGRAM_QUX", Help: "The qux to operate on"},
-			},
-		},
-		{
-			name: "only an Option declares Env",
-			cmd: Command{
-				Name:    "myprogram",
-				Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
-			},
-			want: []envPair{
-				{Name: "PROGRAM_BAR", Help: "Set the bar value"},
-			},
-		},
-		{
-			// Documented order in allEnvVars: Arguments before Options.
-			name: "env vars from both, Arguments first",
-			cmd: Command{
-				Name:      "myprogram",
-				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
-			},
-			want: []envPair{
-				{Name: "APP_QUX", Help: "The qux to operate on"},
-				{Name: "APP_BAR", Help: "Set the bar value"},
-			},
-		},
-		{
-			name: "only the Arguments/Options that declare Env are yielded",
-			cmd: Command{
-				Name: "myprogram",
-				Arguments: []Argument{
-					&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
-					&StringArgument{Name: "quux", Help: "No env for this one"},
-				},
-				Options: []Option{
-					&StringOption{Flag: "-f", Help: "No env for this one either"},
-					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
-				},
-			},
-			want: []envPair{
-				{Name: "APP_QUX", Help: "The qux to operate on"},
-				{Name: "APP_BAR", Help: "Set the bar value"},
-			},
-		},
-		{
-			name: "only a standalone EnvVar",
-			cmd: Command{
-				Name:    "myprogram",
-				EnvVars: []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
-			},
-			want: []envPair{
-				{Name: "APP_DEBUG", Help: "Enable debug logging"},
-			},
-		},
-		{
-			// Documented order in allEnvVars: Arguments, then Options,
-			// then standalone EnvVars last.
-			name: "Arguments, Options, and standalone EnvVars all present, in that order",
-			cmd: Command{
-				Name:      "myprogram",
-				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
-				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
-			},
-			want: []envPair{
-				{Name: "APP_QUX", Help: "The qux to operate on"},
-				{Name: "APP_BAR", Help: "Set the bar value"},
-				{Name: "APP_DEBUG", Help: "Enable debug logging"},
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got []envPair
-			for it := range tt.cmd.allEnvVars() {
-				got = append(got, envPair{Name: it.env(), Help: it.help()})
-			}
-			if !slices.Equal(got, tt.want) {
-				t.Errorf("allEnvVars() = %+v, want %+v", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestAllEnvVars_StopsEarly covers all three early-exit points in
-// allEnvVars -- the "if !yield(...) { return }" inside the Arguments
-// loop, the one inside the Options loop, and the one inside the
-// standalone EnvVars loop -- the same reason TestOptions_StopsEarly
-// needed more than a single stopping point.
-func TestAllEnvVars_StopsEarly(t *testing.T) {
-	cmd := Command{
-		Name:      "myprogram",
-		Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
-		Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
-		EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
-	}
-
-	tests := []struct {
-		name      string
-		stopAfter int
-		wantNames []string
-	}{
-		{
-			name:      "stops inside the Arguments loop",
-			stopAfter: 1,
-			wantNames: []string{"APP_QUX"},
-		},
-		{
-			name:      "stops inside the Options loop",
-			stopAfter: 2,
-			wantNames: []string{"APP_QUX", "APP_BAR"},
-		},
-		{
-			name:      "stops inside the EnvVars loop",
-			stopAfter: 3,
-			wantNames: []string{"APP_QUX", "APP_BAR", "APP_DEBUG"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var got []string
-			cmd.allEnvVars()(func(it item) bool {
-				got = append(got, it.env())
-				return len(got) < tt.stopAfter
-			})
-
-			if !slices.Equal(got, tt.wantNames) {
-				t.Errorf("allEnvVars() stopped after %d = %+v, want %+v", tt.stopAfter, got, tt.wantNames)
-			}
-		})
-	}
-}
-
 // --- Validate ----------------------------------------------------------------
 
 // TestValidate covers what belongs to Validate itself: the Command.Name
@@ -1860,7 +1696,7 @@ func TestHelpString(t *testing.T) {
 			},
 		},
 		{
-			// allEnvVars documents Arguments before Options; this is the
+			// The section lists Arguments before Options; this is the
 			// regression guard for that order.
 			name: "env vars from both an Argument and an Option, Arguments first",
 			cmd: Command{
@@ -1933,9 +1769,8 @@ func TestHelpString(t *testing.T) {
 			},
 		},
 		{
-			// End-to-end regression guard for allEnvVars' documented
-			// order: Arguments, then Options, then standalone EnvVars
-			// last.
+			// End-to-end regression guard for the section's order:
+			// Arguments, then Options, then standalone EnvVars last.
 			name: "standalone EnvVars listed after Argument/Option env vars",
 			cmd: Command{
 				Name:      "myprogram",
