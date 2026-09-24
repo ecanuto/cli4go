@@ -12,13 +12,11 @@ import (
 // command line.
 //
 // Argument is implemented by a family of typed structs -- StringArgument
-// and IntArgument today, with more (BoolArgument, ...) planned -- instead
-// of by one struct carrying a Dest/Default pair whose concrete type has
-// to be inferred at runtime (the old design, still visible as comments
-// in cli.go on the exp/typed-fields branch). Each concrete type owns its
-// Dest and Default as its own Go type (e.g. *string/string, *int/int),
-// so there is nothing to type-switch on, and the compiler keeps Default
-// in sync with Dest for free.
+// and IntArgument -- rather than by one struct carrying a Dest/Default
+// pair whose concrete type has to be inferred at runtime. Each concrete
+// type owns its Dest and Default as its own Go type (e.g. *string/string,
+// *int/int), so there is nothing to type-switch on, and the compiler
+// keeps Default in sync with Dest for free.
 //
 // The interface itself is unexported-method-only, mirroring the
 // Option.flag()/Option.long() pattern already used elsewhere in this
@@ -66,9 +64,7 @@ func argumentValidate(a Argument) error {
 
 // StringArgument describes a single string-typed positional argument --
 // the Argument implementation for the common case of an argument whose
-// value is just the token as typed, with no conversion. It carries the
-// exact same fields the old, unified Argument struct did; only the name
-// and its place in the type system have changed.
+// value is just the token as typed, with no conversion.
 type StringArgument struct {
 	// Name is the argument's display name, used in generated usage text
 	// (e.g. "qux" in "Usage: myprogram [qux]").
@@ -164,12 +160,11 @@ func (a *IntArgument) setDefault() {
 // --- Validate ----------------------------------------------------------------
 
 // validateArguments checks args for structural problems: an invalid
-// Argument (see Argument.validate) or a duplicate Name. It is a free function (not a *Command method) so it
-// stays decoupled from Command and testable on its own. Unlike the old
-// design, there's no Default/Dest type check to run here -- a typed
-// Argument's Default is already the same Go type as its Dest, enforced
-// by the compiler (see validateDefaultType's doc comment for the one
-// place that check still happens at runtime).
+// Argument (see Argument.validate) or a duplicate Name. It is a free
+// function (not a *Command method) so it stays decoupled from Command
+// and testable on its own. There is no Default/Dest type check to run
+// here -- a typed Argument's Default is already the same Go type as its
+// Dest, enforced by the compiler.
 func validateArguments(args []Argument) error {
 	seen := make(map[string]bool, len(args))
 	for _, arg := range args {

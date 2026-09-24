@@ -36,11 +36,9 @@ func (e *Error) Error() string { return e.msg }
 //	0 -- a built-in action fired (-h/--help or -v/--version); the text
 //	     has already been printed to Stdout.
 //	1 -- the Command itself was declared incorrectly (duplicate flag,
-//	     empty Name, a Default that doesn't match its Dest's type or
-//	     can't actually be assigned to it, ...) -- a bug in the
-//	     caller's Go code, not something the end user mistyped on the
-//	     command line. Most often from Validate(), but also from
-//	     Parse's Default resolution (see resolveEnvVar's doc comment).
+//	     empty Name, ...) -- a bug in the caller's Go code, not
+//	     something the end user mistyped on the command line. Reported
+//	     by Validate().
 //	2 -- a real parsing/usage error (unknown option, missing value,
 //	     invalid value, unexpected positional argument, a bad Env
 //	     value) -- matches the getopt/argparse convention of using 2

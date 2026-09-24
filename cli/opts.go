@@ -13,17 +13,15 @@ import (
 // appear in any order on the command line.
 //
 // Option is implemented by a family of typed structs -- StringOption,
-// IntOption, and BoolOption today -- instead of one struct carrying a
+// IntOption, and BoolOption -- rather than by one struct carrying a
 // Dest/Default pair whose concrete type has to be inferred at runtime.
-// See StringOption, IntOption, and BoolOption, and Argument's doc
-// comment above for the same reasoning applied there.
+// See Argument's doc comment for the same reasoning applied there.
 //
 // The interface itself is unexported-method-only: a concrete type keeps
 // its fields public (Name, Flag, Long, ...) for struct-literal
 // construction, and satisfies Option through small unexported accessor
 // methods with different names from the fields they read, so field and
-// method never collide -- the same pattern the old Option.flag()/
-// Option.long() already used before Option became an interface.
+// method never collide.
 type Option interface {
 	name() string
 	help() string
@@ -101,9 +99,7 @@ func optionValidate(o Option) error {
 
 // StringOption describes a single string-typed flag -- the Option
 // implementation for the common case of a flag whose value is just the
-// token as typed, with no conversion. It carries the exact same fields
-// the old, unified Option struct did; only the name and its place in
-// the type system have changed.
+// token as typed, with no conversion.
 type StringOption struct {
 	// Name is an optional, stable identifier for this Option, decoupled
 	// from Flag/Long. It exists for two purposes: as the preferred
@@ -250,8 +246,7 @@ func (o *IntOption) setDefault() {
 // BoolOption describes a single boolean flag -- one whose mere presence
 // on the command line sets it, never consuming a following token (see
 // the Action doc comment). It carries the same fields StringOption does;
-// the type itself is what says "this flag is boolean", replacing the
-// old design's isBoolFlag(Dest) runtime check on a BoolVar-bound Dest.
+// the type itself is what says "this flag is boolean".
 type BoolOption struct {
 	// Name -- see StringOption.Name.
 	Name string
