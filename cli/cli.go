@@ -226,13 +226,25 @@ func (c *Command) options() iter.Seq[Option] {
 	}
 }
 
+// Values for items' scope parameter.
+const (
+	// declaredOnly limits items to what the developer declared on the
+	// Command: Arguments, Options, and EnvVars.
+	declaredOnly = iota
+
+	// withBuiltins also yields the built-in -h/--help and -v/--version
+	// Options that options() synthesizes, in the Options position.
+	withBuiltins
+)
+
 // items returns a generator function that yields every declared
-// Argument, in declaration order, followed by every declared Option and
-// then every EnvVar -- the three families as one sequence of item, for
-// the steps that treat them alike. Built-in options are not included:
-// they have no Env and no Default of their own. The generator stops
-// yielding when yield returns false.
-func (c *Command) items() iter.Seq[item] {
+// Argument, in declaration order, followed by every Option and then
+// every EnvVar -- the three families as one sequence of item, for the
+// steps that treat them alike. With declaredOnly the Options are the
+// user-declared ones; with withBuiltins they are the effective set
+// (options()), the built-ins included after the user-declared ones. The
+// generator stops yielding when yield returns false.
+func (c *Command) items(scope int) iter.Seq[item] {
 	return func(yield func(item) bool) {
 		for _, arg := range c.Arguments {
 			if !yield(arg) {
@@ -240,7 +252,14 @@ func (c *Command) items() iter.Seq[item] {
 			}
 		}
 
-		for _, opt := range c.Options {
+		var opts iter.Seq[Option]
+		if scope == withBuiltins {
+			opts = c.options()
+		} else {
+			opts = slices.Values(c.Options)
+		}
+
+		for opt := range opts {
 			if !yield(opt) {
 				return
 			}
@@ -264,23 +283,24 @@ func (c *Command) items() iter.Seq[item] {
 //
 // Checks, in order:
 //  1. Command.Name non-empty.
-//  2. Every Argument.Name non-empty and unique.
-//  3. Every Option has Flag and/or Long set.
-//  4. Normalized Flag is exactly 2 characters if set.
-//  5. A built-in (-h/--help, -v/--version) whose both normalized forms
+//  2. A built-in (-h/--help, -v/--version) whose both normalized forms
 //     are claimed by the user-declared Options is suppressed, not
 //     yielded by options(). The version built-in also falls back to
 //     -V (or to --version alone) when -v is claimed without
 //     --version; see options' doc comment.
-//  6. Normalized Flag and Long are each unique across the effective
+//  3. Normalized Flag and Long are each unique across the effective
 //     Option set (options() -- user-declared Options plus whichever
 //     built-ins survived suppression), so a partial claim on a
 //     built-in's forms is rejected as a real conflict.
-//  7. Every Option's name() -- Name, else Long/Flag without its
-//     dashes -- is unique across that same effective set.
-//  8. Every standalone EnvVar.Name is non-empty.
-//  9. Every environment variable name -- from Arguments' Env, Options'
+//  4. Then, for every item in order -- Arguments, the effective
+//     Options, then EnvVars -- its own structure: Argument.Name and
+//     EnvVar.Name non-empty, and every Option with a Flag and/or Long,
+//     a normalized Flag being exactly 2 characters.
+//  5. Every environment variable name -- from Arguments' Env, Options'
 //     Env, and EnvVars -- is unique across all three.
+//  6. Every item's name() -- Name, else for an Option Long/Flag
+//     without its dashes -- is unique across all three families and
+//     the built-ins, since a name identifies exactly one item.
 //
 // Dest and Action are not checked against each other -- an Option may
 // set neither, either, or both (see Option.Action's doc comment for
@@ -294,31 +314,51 @@ func (c *Command) items() iter.Seq[item] {
 // os.Exit(err.ExitCode()) idiom Parse/DefaultParse already document.
 func (c *Command) Validate() *Error {
 	// Command.Name is required -- it's used in usage/help/version output.
-	// This check has nowhere else to live: it isn't part of either loop
-	// below, so it stays here rather than in a helper.
+	// This check has nowhere else to live: it isn't about any one item,
+	// so it stays here rather than in the item pass below.
 	if c.Name == "" {
 		return newError(1, "cli: Command.Name must not be empty")
 	}
 
-	// Arguments validation
-	if err := validateArguments(c.Arguments); err != nil {
-		return newError(1, "%s", err)
-	}
-
-	// Options validation. Runs against the effective Option set --
+	// Flag/Long uniqueness runs against the effective Option set --
 	// c.options(), not c.Options -- so a user-declared Option that
 	// collides with a synthesized built-in (a partial claim on -h or
 	// --help, say) is caught here exactly like any other duplicate
-	// flag. See options' doc comment for the suppression rule.
+	// flag. See options' doc comment for the suppression rule. It runs
+	// before the item pass so a shared Flag is reported as such, not as
+	// the duplicate name the two Options also derive.
 	if err := validateOptions(slices.Collect(c.options())); err != nil {
 		return newError(1, "%s", err)
 	}
 
-	// EnvVars validation. Also checks that environment variable names
-	// are unique across Arguments, Options, and EnvVars together, hence
-	// the whole item sequence.
-	if err := validateEnvVars(c.EnvVars, c.items()); err != nil {
-		return newError(1, "%s", err)
+	// One pass over every item, the built-ins included: its own
+	// structure, then the two uniqueness rules that cross families.
+	// The environment variable is checked before the name so that
+	// two EnvVars sharing a name (which is also their environment
+	// variable) are reported as a duplicate environment variable.
+	names := make(map[string]bool)
+	envs := make(map[string]bool)
+	for it := range c.items(withBuiltins) {
+		if err := it.validate(); err != nil {
+			return newError(1, "%s", err)
+		}
+
+		if env := it.env(); env != "" {
+			if envs[env] {
+				return newError(1, "cli: duplicate environment variable %q", env)
+			}
+			envs[env] = true
+		}
+
+		// A name identifies exactly one item, whatever its family, so
+		// it can be looked up unambiguously. An Option without a Name
+		// derives one from Long/Flag, which can collide with an
+		// Argument's Name; an explicit Name settles it.
+		name := it.name()
+		if names[name] {
+			return newError(1, "cli: duplicate name %q; set an explicit Name on one of them", name)
+		}
+		names[name] = true
 	}
 
 	return nil
@@ -476,7 +516,7 @@ func (c *Command) Parse(args []string) *Error {
 	// standalone EnvVars, each in declaration order. Nothing above wrote
 	// a Default or Env value, so a failure in the loop leaves every
 	// untouched Dest exactly as the caller had it.
-	for it := range c.items() {
+	for it := range c.items(declaredOnly) {
 		if seen[it] {
 			continue
 		}
@@ -629,7 +669,7 @@ func (c *Command) HelpString() string {
 		}
 	}
 	widthEnvs := 0
-	for it := range c.items() {
+	for it := range c.items(declaredOnly) {
 		w := len(it.env())
 		if w > widthEnvs {
 			widthEnvs = w
@@ -676,7 +716,7 @@ func (c *Command) HelpString() string {
 	// one environment variable
 	if widthEnvs > 0 {
 		fmt.Fprintf(&b, "\nEnvironment Variables:\n")
-		for it := range c.items() {
+		for it := range c.items(declaredOnly) {
 			if it.env() == "" {
 				continue
 			}

@@ -295,15 +295,14 @@ type Action func(c *Command, opt Option, value string) *Error
 
 // --- Validate ----------------------------------------------------------------
 
-// validateOptions checks opts for structural problems: an invalid Option
-// (see item.validate: a missing Flag/Long or a malformed Flag), a
-// duplicate Flag/Long, or a duplicate name()
-// (Option.Name, or the name derived from Long/Flag when Name is unset),
-// which is the Option's stable identifier and so has to be unique. Same
-// free-function
-// shape as validateArguments, for the same reason -- and the same note
-// applies: no Default/Dest type check here, since a typed Option's
-// Default is already the same Go type as its Dest.
+// validateOptions checks opts for a duplicate Flag or Long form. It is
+// a free function (not a *Command method) so it stays decoupled from
+// Command and testable on its own. Everything else about an Option --
+// its own structure (see item.validate) and the uniqueness of its
+// name() -- is checked by Validate's pass over every item, which runs
+// after this one so that two Options sharing only a Flag are reported
+// as a duplicate Flag rather than as the duplicate name they also
+// derive.
 //
 // Validate calls this with the effective Option set
 // (slices.Collect(c.options())), not c.Options, so a user-declared
@@ -313,7 +312,6 @@ type Action func(c *Command, opt Option, value string) *Error
 // even present in that effective set.
 func validateOptions(opts []Option) error {
 	seen := make(map[string]bool, len(opts)*2)
-	seenNames := make(map[string]bool, len(opts))
 	for _, opt := range opts {
 		// Compare Flag/Long in their normalized form, so "-f"/"f" or
 		// "--bar"/"bar" on two different Options are correctly treated
@@ -321,11 +319,6 @@ func validateOptions(opts []Option) error {
 		// checks below as if they were different.
 		flag := opt.flag()
 		long := opt.long()
-
-		// Per-item rules live on the Option itself.
-		if err := opt.validate(); err != nil {
-			return err
-		}
 
 		if flag != "" {
 			if seen[flag] {
@@ -343,15 +336,6 @@ func validateOptions(opts []Option) error {
 			}
 			seen[long] = true
 		}
-
-		// Checked last so a duplicate Flag/Long is still reported as
-		// such -- e.g. two Options sharing only a Flag would otherwise
-		// also derive the same name and hit this error first.
-		name := opt.name()
-		if seenNames[name] {
-			return fmt.Errorf("cli: duplicate option name %q", name)
-		}
-		seenNames[name] = true
 	}
 	return nil
 }

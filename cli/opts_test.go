@@ -93,10 +93,10 @@ func TestIntOption_Accessors(t *testing.T) {
 // --- Validate ----------------------------------------------------------------
 
 // TestValidateOptions exercises validateOptions directly, against a bare
-// []Option, without needing a full Command wrapper.
+// []Option, without needing a full Command wrapper. It covers only the
+// Flag/Long uniqueness rule; an Option's own structure and the
+// uniqueness of its name() are Validate's, see TestValidate.
 func TestValidateOptions(t *testing.T) {
-	var s string
-
 	tests := []struct {
 		name    string
 		opts    []Option
@@ -119,27 +119,11 @@ func TestValidateOptions(t *testing.T) {
 			opts: []Option{&StringOption{Flag: "f", Long: "foo"}},
 		},
 		{
-			name: "valid, option with Action instead of Dest",
-			opts: []Option{&StringOption{Flag: "f", Action: func(*Command, Option, string) *Error { return nil }}},
-		},
-		{
-			name: "valid, option with both Dest and Action",
-			opts: []Option{&StringOption{Flag: "f", Dest: &s, Action: func(*Command, Option, string) *Error { return nil }}},
-		},
-		{
-			name:    "option missing both Flag and Long",
-			opts:    []Option{&StringOption{}},
-			wantErr: true,
-		},
-		{
-			name:    "option Flag longer than one character",
-			opts:    []Option{&StringOption{Flag: "-ab"}},
-			wantErr: true,
-		},
-		{
-			name:    "option Flag with only dashes",
-			opts:    []Option{&StringOption{Flag: "--"}},
-			wantErr: true,
+			name: "valid, distinct Flags and Longs",
+			opts: []Option{
+				&StringOption{Flag: "-f", Long: "--foo"},
+				&StringOption{Flag: "-b"},
+			},
 		},
 		{
 			name: "duplicate option flag, same spelling",
@@ -161,37 +145,6 @@ func TestValidateOptions(t *testing.T) {
 			name: "duplicate option long, different spelling normalizes the same",
 			opts: []Option{
 				&StringOption{Long: "bar"},
-				&StringOption{Long: "--bar"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "distinct derived names are fine",
-			opts: []Option{
-				&StringOption{Flag: "-f", Long: "--foo"},
-				&StringOption{Flag: "-b"},
-			},
-		},
-		{
-			name: "duplicate explicit Name",
-			opts: []Option{
-				&StringOption{Name: "x", Flag: "-a"},
-				&StringOption{Name: "x", Flag: "-b"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "derived name collides: Flag -f and Long --f",
-			opts: []Option{
-				&StringOption{Flag: "-f"},
-				&StringOption{Long: "--f"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "explicit Name collides with another Option's derived name",
-			opts: []Option{
-				&StringOption{Name: "bar", Flag: "-a"},
 				&StringOption{Long: "--bar"},
 			},
 			wantErr: true,

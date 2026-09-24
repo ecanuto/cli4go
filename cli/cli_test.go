@@ -435,17 +435,20 @@ func TestOptions_StopsEarly(t *testing.T) {
 }
 
 // TestItems covers items' order: every Argument, then every Option,
-// then every EnvVar -- and that built-in options are left out.
+// then every EnvVar -- and that the built-in options are yielded, after
+// the user-declared ones, only with withBuiltins.
 func TestItems(t *testing.T) {
 	tests := []struct {
-		name string
-		cmd  Command
-		want []string
+		name  string
+		cmd   Command
+		scope int
+		want  []string
 	}{
 		{
-			name: "nothing declared",
-			cmd:  Command{Name: "myprogram", Version: "1.0.0"},
-			want: nil,
+			name:  "nothing declared, declaredOnly",
+			cmd:   Command{Name: "myprogram", Version: "1.0.0"},
+			scope: declaredOnly,
+			want:  nil,
 		},
 		{
 			name: "Arguments, Options, and EnvVars, in that order",
@@ -455,14 +458,33 @@ func TestItems(t *testing.T) {
 				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar"}},
 				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
 			},
-			want: []string{"qux", "count", "bar", "APP_DEBUG"},
+			scope: declaredOnly,
+			want:  []string{"qux", "count", "bar", "APP_DEBUG"},
+		},
+		{
+			name:  "nothing declared, withBuiltins",
+			cmd:   Command{Name: "myprogram", Version: "1.0.0"},
+			scope: withBuiltins,
+			want:  []string{"help", "version"},
+		},
+		{
+			name: "withBuiltins yields the built-ins after the user-declared Options",
+			cmd: Command{
+				Name:      "myprogram",
+				Version:   "1.0.0",
+				Arguments: []Argument{&StringArgument{Name: "qux"}},
+				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
+			},
+			scope: withBuiltins,
+			want:  []string{"qux", "bar", "help", "version", "APP_DEBUG"},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			for it := range tt.cmd.items() {
+			for it := range tt.cmd.items(tt.scope) {
 				got = append(got, it.name())
 			}
 			if !slices.Equal(got, tt.want) {
@@ -496,7 +518,7 @@ func TestItems_StopsEarly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			cmd.items()(func(it item) bool {
+			cmd.items(declaredOnly)(func(it item) bool {
 				got = append(got, it.name())
 				return len(got) < tt.stopAfter
 			})
@@ -509,12 +531,15 @@ func TestItems_StopsEarly(t *testing.T) {
 
 // --- Validate ----------------------------------------------------------------
 
-// TestValidate covers what belongs to Validate itself: the Command.Name
-// check (not part of either helper) and that a failure from either
-// helper propagates as Validate's own error. Detailed Argument/Option
-// edge cases live in TestValidateArguments and TestValidateOptions,
-// next to the functions they exercise.
+// TestValidate covers Validate end to end: the Command.Name check, the
+// Flag/Long uniqueness check over the effective Option set, and the
+// pass over every item -- its own structure, then the environment
+// variable and name uniqueness rules that cross families. The
+// per-item rules themselves are also covered next to each type, in
+// TestArgument_Validate, TestOption_Validate, and TestEnvVar_Validate.
 func TestValidate(t *testing.T) {
+	var s string
+
 	tests := []struct {
 		name    string
 		cmd     Command
@@ -529,8 +554,33 @@ func TestValidate(t *testing.T) {
 			cmd:     Command{},
 			wantErr: true,
 		},
+
+		// Per-item structure, reached through the item pass.
 		{
-			name: "propagates a validateArguments failure",
+			name: "valid, one item per family",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "qux", Dest: &s}},
+				Options:   []Option{&StringOption{Flag: "-f", Long: "--foo"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
+			},
+		},
+		{
+			name: "valid, Option with Action instead of Dest",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{&StringOption{Flag: "-f", Action: func(*Command, Option, string) *Error { return nil }}},
+			},
+		},
+		{
+			name: "valid, Option with both Dest and Action",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{&StringOption{Flag: "-f", Dest: &s, Action: func(*Command, Option, string) *Error { return nil }}},
+			},
+		},
+		{
+			name: "empty Argument.Name",
 			cmd: Command{
 				Name:      "myprogram",
 				Arguments: []Argument{&StringArgument{Name: ""}},
@@ -538,7 +588,7 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "propagates a validateOptions failure",
+			name: "Option missing both Flag and Long",
 			cmd: Command{
 				Name:    "myprogram",
 				Options: []Option{&StringOption{}},
@@ -546,10 +596,189 @@ func TestValidate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "propagates a validateEnvVars failure",
+			name: "Option Flag longer than one character",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{&StringOption{Flag: "-ab"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Option Flag with only dashes",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{&StringOption{Flag: "--"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty EnvVar.Name",
 			cmd: Command{
 				Name:    "myprogram",
 				EnvVars: []EnvVar{&StringEnvVar{Name: ""}},
+			},
+			wantErr: true,
+		},
+
+		// Environment variable names are unique across all three families.
+		{
+			name: "no Env declared anywhere",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "qux"}},
+				Options:   []Option{&StringOption{Flag: "-f"}},
+			},
+		},
+		{
+			name: "valid, one Env per source",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Env: "APP_BAR"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
+			},
+		},
+		{
+			name: "duplicate environment variable, both from EnvVars",
+			cmd: Command{
+				Name:    "myprogram",
+				EnvVars: []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}, &StringEnvVar{Name: "APP_DEBUG"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate environment variable, both from Arguments",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					&StringArgument{Name: "qux", Env: "APP_QUX"},
+					&StringArgument{Name: "quux", Env: "APP_QUX"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate environment variable, Argument.Env vs Option.Env",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
+				Options:   []Option{&StringOption{Flag: "-b", Env: "APP_QUX"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate environment variable, Argument.Env vs EnvVars",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_QUX"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate environment variable, Option.Env vs EnvVars",
+			cmd: Command{
+				Name:    "myprogram",
+				Options: []Option{&StringOption{Flag: "-b", Env: "APP_BAR"}},
+				EnvVars: []EnvVar{&StringEnvVar{Name: "APP_BAR"}},
+			},
+			wantErr: true,
+		},
+
+		// Item names are unique across all three families.
+		{
+			name: "duplicate Argument.Name",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "qux"}, &StringArgument{Name: "qux"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate explicit Option.Name",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Name: "x", Flag: "-a"},
+					&StringOption{Name: "x", Flag: "-b"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Option names derived from Long/Flag collide: Flag -f and Long --f",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Flag: "-f"},
+					&StringOption{Long: "--f"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "explicit Option.Name collides with another Option's derived name",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Name: "bar", Flag: "-a"},
+					&StringOption{Long: "--bar"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Argument.Name collides with an Option's derived name",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "file"}},
+				Options:   []Option{&StringOption{Long: "--file"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "explicit Option.Name settles a collision with an Argument.Name",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "file"}},
+				Options:   []Option{&StringOption{Name: "input", Long: "--file"}},
+			},
+		},
+		{
+			name: "Argument.Name collides with the version built-in's name",
+			cmd: Command{
+				Name:      "myprogram",
+				Version:   "0.1.0",
+				Arguments: []Argument{&StringArgument{Name: "version"}},
+			},
+			wantErr: true,
+		},
+		{
+			name: "Argument.Name matches the version built-in's name, but the built-in is absent without Version",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "version"}},
+			},
+		},
+		{
+			name: "Argument.Name collides with an EnvVar.Name",
+			cmd: Command{
+				Name:      "myprogram",
+				Arguments: []Argument{&StringArgument{Name: "APP_DEBUG"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
+			},
+			wantErr: true,
+		},
+
+		// Flag/Long uniqueness, and the built-ins' suppression rules.
+		{
+			name: "duplicate Flag is reported before the name it also derives",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Flag: "-f"},
+					&StringOption{Flag: "-f"},
+				},
 			},
 			wantErr: true,
 		},

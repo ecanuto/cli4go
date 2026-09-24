@@ -2,7 +2,6 @@ package cli
 
 import (
 	"errors"
-	"fmt"
 )
 
 // --- Argument ----------------------------------------------------------------
@@ -108,32 +107,3 @@ func (a *IntArgument) env() string        { return a.Env }
 func (a *IntArgument) validate() error    { return argumentValidate(a) }
 func (a *IntArgument) set(s string) error { return setDest(a.Dest, s, parseInt) }
 func (a *IntArgument) setDefault()        { setDestDefault(a.Dest, a.Default) }
-
-// --- Validate ----------------------------------------------------------------
-
-// validateArguments checks args for structural problems: an invalid
-// Argument (see item.validate) or a duplicate Name. It is a free
-// function (not a *Command method) so it stays decoupled from Command
-// and testable on its own. There is no Default/Dest type check to run
-// here -- a typed Argument's Default is already the same Go type as its
-// Dest, enforced by the compiler.
-func validateArguments(args []Argument) error {
-	seen := make(map[string]bool, len(args))
-	for _, arg := range args {
-		// Per-item rules live on the Argument itself.
-		if err := arg.validate(); err != nil {
-			return err
-		}
-		name := arg.name()
-
-		// Argument names must be unique -- Parse fills positional
-		// Arguments in declaration order, so a duplicate name would be
-		// ambiguous in help output even though parsing itself doesn't
-		// use Name as a lookup key.
-		if seen[name] {
-			return fmt.Errorf("cli: duplicate argument name %q", name)
-		}
-		seen[name] = true
-	}
-	return nil
-}

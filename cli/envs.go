@@ -2,8 +2,6 @@ package cli
 
 import (
 	"errors"
-	"fmt"
-	"iter"
 )
 
 // --- EnvVar ------------------------------------------------------------------
@@ -65,38 +63,3 @@ func (e *StringEnvVar) env() string        { return e.Name }
 func (e *StringEnvVar) validate() error    { return envVarValidate(e) }
 func (e *StringEnvVar) set(s string) error { return setDest(e.Dest, s, parseString) }
 func (e *StringEnvVar) setDefault()        { setDestDefault(e.Dest, e.Default) }
-
-// --- Validate ----------------------------------------------------------------
-
-// validateEnvVars checks the environment variables a Command declares:
-// every EnvVar in envs must be valid (see item.validate), and no
-// environment variable name may be declared more than once across all
-// -- Arguments' Env, Options' Env, and EnvVars together -- since two
-// entries claiming the same variable would be ambiguous and would
-// render as a duplicate row in the generated "Environment Variables:"
-// help section.
-//
-// Unlike validateArguments and validateOptions it takes both the EnvVars
-// to validate and the whole item sequence to check names against: the
-// uniqueness rule is inherently cross-family, so a bare []EnvVar could
-// not enforce it.
-func validateEnvVars(envs []EnvVar, all iter.Seq[item]) error {
-	for _, env := range envs {
-		if err := env.validate(); err != nil {
-			return err
-		}
-	}
-
-	seen := make(map[string]bool)
-	for it := range all {
-		name := it.env()
-		if name == "" {
-			continue
-		}
-		if seen[name] {
-			return fmt.Errorf("cli: duplicate environment variable %q", name)
-		}
-		seen[name] = true
-	}
-	return nil
-}
