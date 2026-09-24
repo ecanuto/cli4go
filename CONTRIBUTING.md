@@ -7,7 +7,7 @@ change before merge.
 
 ## Requirements
 
-- Go 1.23 or newer (the module uses `iter.Seq`/`iter.Seq2`).
+- Go 1.25 or newer.
 
 ## Building and testing
 
