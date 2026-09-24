@@ -623,24 +623,19 @@ func (c *Command) HelpString() string {
 	// "-x, " short flag column an Option row has but an Argument row
 	// doesn't, and the longest environment variable name. Each is computed
 	// on its own and combined below.
-	widthArgs := 0
+	var widthArgs, widthOpts, widthEnvs int
 	for _, arg := range c.Arguments {
-		w := len(arg.name())
-		if w > widthArgs {
+		if w := len(arg.name()); w > widthArgs {
 			widthArgs = w
 		}
 	}
-	widthOpts := 0
 	for opt := range c.options() {
-		w := len(opt.long()) + 4 // 4 = len("-x, ")
-		if w > widthOpts {
+		if w := len(opt.long()) + 4; w > widthOpts { // 4 = len("-x, ")
 			widthOpts = w
 		}
 	}
-	widthEnvs := 0
 	for it := range c.items(declaredOnly) {
-		w := len(it.env())
-		if w > widthEnvs {
+		if w := len(it.env()); w > widthEnvs {
 			widthEnvs = w
 		}
 	}
