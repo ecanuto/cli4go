@@ -34,19 +34,19 @@ func main() {
 		Version:     "0.1.0",
 		Description: "My foo bar program",
 		Arguments: []cli.Argument{
-			{
-				Name: "qux", Help: "The qux to operate on",
-				Dest: cli.StringVar(&cfg.Qux),
+			&cli.StringArgument{
+				Name: "qux", 
+				Help: "The qux to operate on", Dest: &cfg.Foo,
 			},
 		},
 		Options: []cli.Option{
-			{
-				Flag: "-f", Long: "--foo", Help: "Enable foo mode",
-				Dest: cli.BoolVar(&cfg.Foo),
+			&cli.BoolOption{
+				Flag: "-f", Long: "--foo",
+				Help: "Enable foo mode", Dest: &cfg.Foo,
 			},
-			{
-				Flag: "-b", Long: "--bar", Help: "Set the bar value",
-				Dest: cli.StringVar(&cfg.Bar), Default: "default-bar", Env: "PROGRAM_BAR",
+			&cli.StringOption{
+				Flag: "-b", Long: "--bar", Default: "default-bar", Env: "PROGRAM_BAR",
+				Help: "Set the bar value", Dest: &cfg.Bar,
 			},
 		},
 	}
@@ -96,31 +96,41 @@ go get github.com/ecanuto/cli4go/cli
 - **`clap`-style help output.** Usage, description, arguments, options,
   and environment variables are rendered in clearly separated, aligned
   sections.
-- **Environment variable support.** Any option can declare an `Env`
-  name; `cli4go` resolves it automatically as part of the value's
-  precedence chain.
-- **Typed variable binding.** `StringVar`, `IntVar`, `BoolVar` (and
-  more to come) bind directly into your own config struct fields -- no
-  reflection gymnastics required on your end.
+- **Environment variable support.** Any argument or option can declare
+  an `Env` name, and a standalone `EnvVars` list covers variables that
+  have no flag; `cli4go` resolves them automatically as part of the
+  value's precedence chain.
+- **Typed fields.** `StringArgument`, `IntArgument`, `StringOption`,
+  `IntOption`, `BoolOption` and `StringEnvVar` each own a typed `Dest`
+  and `Default`, so the compiler keeps them in sync -- no reflection and
+  no runtime type checks on your end.
 
 ## Design notes
 
 ### Config as data
 
-Because a `Program` (and its `Arguments` and `Options`) are plain struct
-literals, `gofmt` aligns every field automatically. Declaring a CLI in
-`cli4go` reads like a table, not a sequence of builder calls:
+Because a `Program` (and its `Arguments`, `Options` and `EnvVars`) are
+plain struct literals, `gofmt` aligns every field automatically.
+Declaring a CLI in `cli4go` reads like a table, not a sequence of
+builder calls:
 
 ```go
 Options: []cli.Option{
-	{Flag: "-f", Long: "--foo", Help: "...", Dest: cli.BoolVar(&cfg.Foo)},
-	{Flag: "-b", Long: "--bar", Help: "...", Dest: cli.StringVar(&cfg.Bar)},
+	&cli.BoolOption{Flag: "-f", Long: "--foo", Help: "...", Dest: &cfg.Foo},
+	&cli.StringOption{Flag: "-b", Long: "--bar", Help: "...", Dest: &cfg.Bar},
 },
 ```
 
 This also means a `Program` is trivially inspectable and serializable
 -- laying the groundwork for generating one from a YAML/JSON config, or
 generating Go code from a `Program` definition, in a future release.
+
+### Typed fields
+
+Every concrete type carries its own `Dest *T` and `Default T`, for
+example `StringOption{Dest *string; Default string}` or
+`IntOption{Dest *int; Default int}`. A mismatch between the two is a
+compile error rather than a runtime one.
 
 ### Value precedence
 
@@ -134,6 +144,16 @@ Default -> Environment variable (Env) -> Command-line flag
 A flag passed on the command line always wins; if it's absent, `cli4go`
 falls back to the environment variable (if `Env` is set and present);
 if that's also absent, it falls back to `Default`.
+
+Every item that is not given on the command line is written exactly
+once, so a `Default` left at its zero value is applied like any other:
+it overwrites whatever `Dest` held before `Parse()`. Set the initial
+value through `Default`, not by pre-filling the destination.
+
+Invalid values (for example a non-numeric `IntOption` or a bad
+environment variable) are reported as usage errors with exit code 2,
+while declaration mistakes (duplicate flags, empty names, duplicate
+environment variables) are reported by `Validate()` with exit code 1.
 
 ## Status
 
