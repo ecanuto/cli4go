@@ -4,7 +4,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -192,22 +191,29 @@ func (c *Command) options() iter.Seq[Option] {
 	}
 }
 
-// allEnvVars returns a generator function that yields an EnvVar for
+// envEntry is what the generated help needs to know about one
+// environment variable: its name and its help text.
+type envEntry struct {
+	Name string
+	Help string
+}
+
+// allEnvVars returns a generator function that yields an envEntry for
 // every Argument and Option in the Command that defines an Env field,
-// followed by every entry in EnvVars itself. The generator yields
-// environment variables from Arguments first, then Options, then
+// followed by one for every entry in EnvVars itself. The generator
+// yields environment variables from Arguments first, then Options, then
 // EnvVars, in that order. The generator stops yielding when yield
 // returns false.
 //
-// An entry derived from an Argument or Option carries only Name and
-// Help -- all HelpString, its only caller, reads. Its Dest and Default
-// stay on the Argument/Option itself: Parse resolves Env/Default per
-// item (see fromEnv/setDefault) and does not walk this sequence.
-func (c *Command) allEnvVars() iter.Seq[EnvVar] {
-	return func(yield func(EnvVar) bool) {
+// The entries carry only what HelpString, their only caller, reads.
+// Dest and Default stay on the Argument/Option/EnvVar itself: Parse
+// resolves Env/Default per item (see fromEnv/setDefault) and does not
+// walk this sequence.
+func (c *Command) allEnvVars() iter.Seq[envEntry] {
+	return func(yield func(envEntry) bool) {
 		for _, arg := range c.Arguments {
 			if arg.env() != "" {
-				if !yield(EnvVar{Name: arg.env(), Help: arg.help()}) {
+				if !yield(envEntry{Name: arg.env(), Help: arg.help()}) {
 					return
 				}
 			}
@@ -215,14 +221,14 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 
 		for opt := range c.options() {
 			if opt.env() != "" {
-				if !yield(EnvVar{Name: opt.env(), Help: opt.help()}) {
+				if !yield(envEntry{Name: opt.env(), Help: opt.help()}) {
 					return
 				}
 			}
 		}
 
 		for _, env := range c.EnvVars {
-			if !yield(env) {
+			if !yield(envEntry{Name: env.env(), Help: env.help()}) {
 				return
 			}
 		}
@@ -256,11 +262,6 @@ func (c *Command) allEnvVars() iter.Seq[EnvVar] {
 //  8. Every standalone EnvVar.Name is non-empty.
 //  9. Every environment variable name -- from Arguments' Env, Options'
 //     Env, and EnvVars -- is unique across all three.
-//  10. Every standalone EnvVar's Default (if set) type-matches its
-//     Dest's concrete type -- the one Default/Dest check Validate still
-//     performs at runtime, now that Argument/Option's typed Dest/
-//     Default fields (e.g. StringOption's *string/string pair) are
-//     already kept in sync by the compiler.
 //
 // Dest and Action are not checked against each other -- an Option may
 // set neither, either, or both (see Option.Action's doc comment for
@@ -303,14 +304,10 @@ func (c *Command) Validate() *Error {
 	return nil
 }
 
-// validateEnvVars checks that every standalone EnvVar.Name is non-empty
-// (mirroring the Argument.Name check in validateArguments), that no
-// environment variable name is declared more than once across
-// Arguments' Env, Options' Env, and EnvVars, and that each standalone
-// EnvVar's Default (if set) type-matches its Dest -- unlike Argument/
-// Option, EnvVar's Dest/Default pair is still untyped (Value/any), so
-// this is the one place that check still runs at runtime; see
-// validateDefaultType's doc comment. A duplicate name would be
+// validateEnvVars checks that every standalone EnvVar is valid (see
+// EnvVar.validate: a non-empty Name) and that no environment variable
+// name is declared more than once across Arguments' Env, Options' Env,
+// and EnvVars. A duplicate name would be
 // genuinely ambiguous -- two entries claiming the same environment
 // variable -- and would render as a literal duplicate row in the
 // generated "Environment Variables:" help section.
@@ -345,17 +342,16 @@ func (c *Command) validateEnvVars() error {
 	}
 
 	for _, env := range c.EnvVars {
-		if env.Name == "" {
-			return errors.New("cli: EnvVar.Name must not be empty")
-		}
-		if seen[env.Name] {
-			return fmt.Errorf("cli: duplicate environment variable %q", env.Name)
-		}
-		seen[env.Name] = true
-
-		if err := validateDefaultType(env.Dest, env.Default); err != nil {
+		// Per-item rules live on the EnvVar itself.
+		if err := env.validate(); err != nil {
 			return err
 		}
+
+		name := env.name()
+		if seen[name] {
+			return fmt.Errorf("cli: duplicate environment variable %q", name)
+		}
+		seen[name] = true
 	}
 
 	return nil
@@ -386,8 +382,7 @@ func (c *Command) validateEnvVars() error {
 //     ErrHelp) / errors.Is(err, ErrVersion) to tell which one fired, if
 //     that matters.
 //   - a code-1 failure (ExitCode() == 1): the Command itself was
-//     declared incorrectly -- from Validate() or from a Default that
-//     can't be assigned (see resolveEnvVar's doc comment). Nothing is
+//     declared incorrectly, as reported by Validate(). Nothing is
 //     printed.
 //   - a real parsing/usage error (ExitCode() == 2): an unknown or
 //     invalid option/argument, including a bad Env value, or whatever
@@ -538,8 +533,12 @@ func (c *Command) Parse(args []string) *Error {
 		}
 	}
 	for _, env := range c.EnvVars {
-		if err := c.resolveEnvVar(env.Dest, env.Name, env.Default); err != nil {
+		found, err := c.fromEnv(env.env(), env.set)
+		if err != nil {
 			return err
+		}
+		if !found {
+			env.setDefault()
 		}
 	}
 
@@ -567,39 +566,6 @@ func (c *Command) fromEnv(name string, set func(string) error) (bool, *Error) {
 		return false, c.PrintErrorf("invalid value %q for environment variable %q: %w", val, name, err)
 	}
 	return true, nil
-}
-
-// resolveEnvVar assigns a standalone EnvVar's Dest its fallback value:
-// the environment variable envName when it is present (see fromEnv),
-// otherwise def. Exactly one of the two is applied, so dest is written
-// at most once. Unlike an Argument/Option -- whose typed Default is
-// assigned directly by setDefault -- an EnvVar's Default is still an
-// untyped any, so it goes through dest.Set(fmt.Sprint(def)).
-//
-// A Default that can't be assigned is a different kind of problem from
-// a bad Env value: it can only come from a standalone EnvVar with a
-// mismatched Dest/Default -- caught first by validateDefaultType/
-// Validate -- or a custom Value implementation Validate deliberately
-// can't check (see validateDefaultType's doc comment). That is the same
-// kind of problem Validate() itself reports -- the Command was declared
-// incorrectly, not something the end user typed -- so, like Validate(),
-// it reports ExitCode() == 1 and prints nothing.
-func (c *Command) resolveEnvVar(dest Value, envName string, def any) *Error {
-	if dest == nil {
-		return nil
-	}
-
-	if found, err := c.fromEnv(envName, dest.Set); err != nil || found {
-		return err
-	}
-
-	if def == nil {
-		return nil
-	}
-	if err := dest.Set(fmt.Sprint(def)); err != nil {
-		return newError(1, "%s", fmt.Errorf("cli: invalid default value %v: %w", def, err))
-	}
-	return nil
 }
 
 // DefaultParse is a convenience wrapper around Parse that reads

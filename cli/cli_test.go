@@ -438,7 +438,7 @@ func TestAllEnvVars(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  Command
-		want []EnvVar
+		want []envEntry
 	}{
 		{
 			name: "no Env declared anywhere",
@@ -455,7 +455,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:      "myprogram",
 				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "PROGRAM_QUX"}},
 			},
-			want: []EnvVar{
+			want: []envEntry{
 				{Name: "PROGRAM_QUX", Help: "The qux to operate on"},
 			},
 		},
@@ -465,7 +465,7 @@ func TestAllEnvVars(t *testing.T) {
 				Name:    "myprogram",
 				Options: []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR"}},
 			},
-			want: []EnvVar{
+			want: []envEntry{
 				{Name: "PROGRAM_BAR", Help: "Set the bar value"},
 			},
 		},
@@ -477,7 +477,7 @@ func TestAllEnvVars(t *testing.T) {
 				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
 				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
 			},
-			want: []EnvVar{
+			want: []envEntry{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 			},
@@ -495,7 +495,7 @@ func TestAllEnvVars(t *testing.T) {
 					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"},
 				},
 			},
-			want: []EnvVar{
+			want: []envEntry{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 			},
@@ -504,9 +504,9 @@ func TestAllEnvVars(t *testing.T) {
 			name: "only a standalone EnvVar",
 			cmd: Command{
 				Name:    "myprogram",
-				EnvVars: []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
+				EnvVars: []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
-			want: []EnvVar{
+			want: []envEntry{
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
 			},
 		},
@@ -518,9 +518,9 @@ func TestAllEnvVars(t *testing.T) {
 				Name:      "myprogram",
 				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
 				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
-				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
-			want: []EnvVar{
+			want: []envEntry{
 				{Name: "APP_QUX", Help: "The qux to operate on"},
 				{Name: "APP_BAR", Help: "Set the bar value"},
 				{Name: "APP_DEBUG", Help: "Enable debug logging"},
@@ -548,7 +548,7 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 		Name:      "myprogram",
 		Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
 		Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
-		EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
+		EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 	}
 
 	tests := []struct {
@@ -576,7 +576,7 @@ func TestAllEnvVars_StopsEarly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
-			cmd.allEnvVars()(func(env EnvVar) bool {
+			cmd.allEnvVars()(func(env envEntry) bool {
 				got = append(got, env.Name)
 				return len(got) < tt.stopAfter
 			})
@@ -630,7 +630,7 @@ func TestValidate(t *testing.T) {
 			name: "propagates a validateEnvVars failure",
 			cmd: Command{
 				Name:    "myprogram",
-				EnvVars: []EnvVar{{Name: ""}},
+				EnvVars: []EnvVar{&StringEnvVar{Name: ""}},
 			},
 			wantErr: true,
 		},
@@ -707,8 +707,6 @@ func TestValidate(t *testing.T) {
 // cross-slice (Arguments' Env, Options' Env, and EnvVars together), so
 // it takes a full Command rather than a bare slice.
 func TestValidateEnvVars(t *testing.T) {
-	var s string
-
 	tests := []struct {
 		name    string
 		cmd     Command
@@ -726,18 +724,18 @@ func TestValidateEnvVars(t *testing.T) {
 			cmd: Command{
 				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
 				Options:   []Option{&StringOption{Flag: "-b", Env: "APP_BAR"}},
-				EnvVars:   []EnvVar{{Name: "APP_DEBUG"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}},
 			},
 		},
 		{
 			name:    "empty EnvVar.Name",
-			cmd:     Command{EnvVars: []EnvVar{{Name: ""}}},
+			cmd:     Command{EnvVars: []EnvVar{&StringEnvVar{Name: ""}}},
 			wantErr: true,
 		},
 		{
 			name: "duplicate name, both from EnvVars",
 			cmd: Command{
-				EnvVars: []EnvVar{{Name: "APP_DEBUG"}, {Name: "APP_DEBUG"}},
+				EnvVars: []EnvVar{&StringEnvVar{Name: "APP_DEBUG"}, &StringEnvVar{Name: "APP_DEBUG"}},
 			},
 			wantErr: true,
 		},
@@ -766,7 +764,7 @@ func TestValidateEnvVars(t *testing.T) {
 			name: "duplicate name, Argument.Env vs EnvVars",
 			cmd: Command{
 				Arguments: []Argument{&StringArgument{Name: "qux", Env: "APP_QUX"}},
-				EnvVars:   []EnvVar{{Name: "APP_QUX"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_QUX"}},
 			},
 			wantErr: true,
 		},
@@ -774,20 +772,7 @@ func TestValidateEnvVars(t *testing.T) {
 			name: "duplicate name, Option.Env vs EnvVars",
 			cmd: Command{
 				Options: []Option{&StringOption{Flag: "-b", Env: "APP_BAR"}},
-				EnvVars: []EnvVar{{Name: "APP_BAR"}},
-			},
-			wantErr: true,
-		},
-		{
-			name: "Default matches Dest type",
-			cmd: Command{
-				EnvVars: []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&s), Default: "info"}},
-			},
-		},
-		{
-			name: "Default mismatches Dest type",
-			cmd: Command{
-				EnvVars: []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&s), Default: 42}},
+				EnvVars: []EnvVar{&StringEnvVar{Name: "APP_BAR"}},
 			},
 			wantErr: true,
 		},
@@ -803,15 +788,18 @@ func TestValidateEnvVars(t *testing.T) {
 	}
 }
 
-// failingValue is a Value whose Set always fails. Used to exercise the
-// resolveEnvVar's Default Set-failure path (TestResolveEnvVar) -- validateDefaultType
-// can't catch a bad Default for a custom Value ahead of time (see its
-// doc comment), so Validate() lets it through and resolveEnvVar is the only
-// place left to catch it.
-type failingValue struct{}
+// failingEnvVar is an EnvVar whose set always fails. Only StringEnvVar
+// exists so far, and a string never fails to convert, so this stands in
+// for a future typed EnvVar (say, an int one) to exercise Parse's
+// handling of a bad environment variable value for a standalone EnvVar.
+type failingEnvVar struct{ envName string }
 
-func (failingValue) String() string   { return "" }
-func (failingValue) Set(string) error { return errors.New("boom") }
+func (f *failingEnvVar) name() string     { return f.envName }
+func (f *failingEnvVar) help() string     { return "" }
+func (f *failingEnvVar) env() string      { return f.envName }
+func (f *failingEnvVar) validate() error  { return nil }
+func (f *failingEnvVar) set(string) error { return errors.New("boom") }
+func (f *failingEnvVar) setDefault()      {}
 
 // --- Parse -------------------------------------------------------------------
 
@@ -889,7 +877,7 @@ func TestParse(t *testing.T) {
 		t.Setenv("APP_DEBUG", "verbose")
 		c := &Command{
 			Name:    "myprogram",
-			EnvVars: []EnvVar{{Name: "APP_DEBUG", Dest: StringVar(&s)}},
+			EnvVars: []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Dest: &s}},
 		}
 
 		if err := c.Parse(nil); err != nil {
@@ -900,16 +888,12 @@ func TestParse(t *testing.T) {
 		}
 	})
 
-	t.Run("an unassignable Default propagates: a code-1 *Error, nothing printed", func(t *testing.T) {
-		// validateDefaultType can't check a custom Value's Default (see
-		// its doc comment), so Validate() lets this through and
-		// resolveEnvVar is the one that has to reject it. A custom
-		// Value can only be plugged in via a standalone EnvVar now --
-		// a typed Option's Dest is a native pointer, not a Value.
+	t.Run("invalid value for a standalone EnvVar: ExitCode 2 and a clap-style block on Stderr", func(t *testing.T) {
 		var buf bytes.Buffer
+		t.Setenv("APP_X", "anything")
 		c := &Command{
 			Name:    "myprogram",
-			EnvVars: []EnvVar{{Name: "APP_X", Dest: failingValue{}, Default: "anything"}},
+			EnvVars: []EnvVar{&failingEnvVar{envName: "APP_X"}},
 			Stderr:  &buf,
 		}
 
@@ -917,11 +901,11 @@ func TestParse(t *testing.T) {
 		if err == nil {
 			t.Fatal("Parse() = nil, want error")
 		}
-		if err.ExitCode() != 1 {
-			t.Errorf("ExitCode() = %d, want 1", err.ExitCode())
+		if err.ExitCode() != 2 {
+			t.Errorf("ExitCode() = %d, want 2", err.ExitCode())
 		}
-		if buf.Len() != 0 {
-			t.Errorf("Parse() wrote %q to Stderr, want nothing", buf.String())
+		if buf.Len() == 0 {
+			t.Error("Parse() wrote nothing to Stderr, want the clap-style block")
 		}
 	})
 
@@ -1994,7 +1978,7 @@ func TestHelpString(t *testing.T) {
 				Name:      "myprogram",
 				Arguments: []Argument{&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"}},
 				Options:   []Option{&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "APP_BAR"}},
-				EnvVars:   []EnvVar{{Name: "APP_DEBUG", Help: "Enable debug logging"}},
+				EnvVars:   []EnvVar{&StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}},
 			},
 			want: []string{
 				"Usage: myprogram [options] [qux]",
@@ -2099,95 +2083,6 @@ func TestPrintVersion(t *testing.T) {
 	}
 }
 
-// TestResolveEnvVar exercises (*Command).resolveEnvVar directly: the Env -> Default
-// fallback for one item the command line did not set.
-func TestResolveEnvVar(t *testing.T) {
-	t.Run("nil Dest does nothing", func(t *testing.T) {
-		t.Setenv("APP_X", "boom")
-		c := &Command{Name: "myprogram"}
-		if err := c.resolveEnvVar(nil, "APP_X", "d"); err != nil {
-			t.Errorf("resolveEnvVar() = %v, want nil", err)
-		}
-	})
-
-	t.Run("env wins over default", func(t *testing.T) {
-		var s string
-		t.Setenv("APP_X", "from-env")
-		c := &Command{Name: "myprogram"}
-		if err := c.resolveEnvVar(StringVar(&s), "APP_X", "d"); err != nil {
-			t.Fatalf("resolveEnvVar() = %v, want nil", err)
-		}
-		if s != "from-env" {
-			t.Errorf("Dest = %q, want %q", s, "from-env")
-		}
-	})
-
-	t.Run("default when env is absent", func(t *testing.T) {
-		var s string
-		c := &Command{Name: "myprogram"}
-		if err := c.resolveEnvVar(StringVar(&s), "APP_SURELY_UNSET_X", "d"); err != nil {
-			t.Fatalf("resolveEnvVar() = %v, want nil", err)
-		}
-		if s != "d" {
-			t.Errorf("Dest = %q, want %q", s, "d")
-		}
-	})
-
-	t.Run("no env name: default applies", func(t *testing.T) {
-		var s string
-		c := &Command{Name: "myprogram"}
-		if err := c.resolveEnvVar(StringVar(&s), "", "d"); err != nil {
-			t.Fatalf("resolveEnvVar() = %v, want nil", err)
-		}
-		if s != "d" {
-			t.Errorf("Dest = %q, want %q", s, "d")
-		}
-	})
-
-	t.Run("nil default leaves Dest alone", func(t *testing.T) {
-		s := "keep"
-		c := &Command{Name: "myprogram"}
-		if err := c.resolveEnvVar(StringVar(&s), "APP_SURELY_UNSET_X", nil); err != nil {
-			t.Fatalf("resolveEnvVar() = %v, want nil", err)
-		}
-		if s != "keep" {
-			t.Errorf("Dest = %q, want %q", s, "keep")
-		}
-	})
-
-	t.Run("bad env value: ExitCode 2, printed", func(t *testing.T) {
-		var i int
-		var buf bytes.Buffer
-		t.Setenv("APP_X", "nope")
-		c := &Command{Name: "myprogram", Stderr: &buf}
-		err := c.resolveEnvVar(IntVar(&i), "APP_X", nil)
-		if err == nil {
-			t.Fatal("resolveEnvVar() = nil, want error")
-		}
-		if err.ExitCode() != 2 {
-			t.Errorf("ExitCode() = %d, want 2", err.ExitCode())
-		}
-		if buf.Len() == 0 {
-			t.Error("resolveEnvVar() wrote nothing to Stderr, want the clap-style block")
-		}
-	})
-
-	t.Run("unassignable default: ExitCode 1, nothing printed", func(t *testing.T) {
-		var buf bytes.Buffer
-		c := &Command{Name: "myprogram", Stderr: &buf}
-		err := c.resolveEnvVar(failingValue{}, "", "anything")
-		if err == nil {
-			t.Fatal("resolveEnvVar() = nil, want error")
-		}
-		if err.ExitCode() != 1 {
-			t.Errorf("ExitCode() = %d, want 1", err.ExitCode())
-		}
-		if buf.Len() != 0 {
-			t.Errorf("resolveEnvVar() wrote %q to Stderr, want nothing", buf.String())
-		}
-	})
-}
-
 // TestParse_Resolution covers what moving Env/Default resolution after
 // the token loop guarantees: only items the command line did not set
 // are resolved, and a failed parse leaves every Dest untouched.
@@ -2280,8 +2175,8 @@ func TestParse_Resolution(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			EnvVars: []EnvVar{
-				{Name: "APP_A", Dest: StringVar(&a), Default: "da"},
-				{Name: "APP_SURELY_UNSET_B", Dest: StringVar(&b), Default: "db"},
+				&StringEnvVar{Name: "APP_A", Dest: &a, Default: "da"},
+				&StringEnvVar{Name: "APP_SURELY_UNSET_B", Dest: &b, Default: "db"},
 			},
 		}
 		if err := c.Parse(nil); err != nil {

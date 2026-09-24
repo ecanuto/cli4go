@@ -1,15 +1,57 @@
 package cli
 
-import (
-	"fmt"
-)
+import "errors"
+
+// --- EnvVar ------------------------------------------------------------------
 
 // EnvVar describes a standalone environment variable: one not bound to
 // any Argument or Option's Env field. Unlike Argument/Option, it has no
 // Flag/Long -- it is reachable only via the environment, never via a
-// command-line token -- so its value precedence is just Default -> Env,
-// with no flag position to override it.
-type EnvVar struct {
+// command-line token -- so its value precedence is just Env, then
+// Default, with no flag position to override it.
+//
+// EnvVar is implemented by a family of typed structs -- StringEnvVar
+// today -- with the same shape as Argument and Option, and for the same
+// reason: each concrete type owns its Dest and Default as its own Go
+// type, so there is nothing to type-check at runtime. See Argument's
+// doc comment.
+type EnvVar interface {
+	name() string
+	help() string
+	env() string
+
+	// validate reports a structural problem with this EnvVar on its own
+	// -- today, an empty Name. Cross-item rules (unique environment
+	// variable names across Arguments, Options, and EnvVars) stay in
+	// Command.validateEnvVars.
+	validate() error
+
+	// set stores s, the value of the environment variable, into Dest.
+	// See Argument.set.
+	set(s string) error
+
+	// setDefault assigns Default to Dest, when Dest is set. See
+	// Argument.setDefault.
+	setDefault()
+}
+
+// envVarValidate is the base behavior behind every EnvVar
+// implementation's validate() method (see argumentValidate): every
+// EnvVar needs a name, since the name is the environment variable
+// itself. It never calls e.validate().
+func envVarValidate(e EnvVar) error {
+	if e.name() == "" {
+		return errors.New("cli: EnvVar.Name must not be empty")
+	}
+	return nil
+}
+
+// --- StringEnvVar ------------------------------------------------------------
+
+// StringEnvVar describes a standalone string-typed environment
+// variable -- the EnvVar implementation for the common case of a
+// variable whose value is used as-is, with no conversion.
+type StringEnvVar struct {
 	// Name is the environment variable name.
 	Name string
 
@@ -17,45 +59,33 @@ type EnvVar struct {
 	// generated "Environment Variables:" help section.
 	Help string
 
-	// Dest binds the resolved value to a variable. See StringVar,
-	// BoolVar, IntVar. Optional -- an EnvVar with no Dest is purely
+	// Dest binds the resolved value directly to a string variable, e.g.
+	// &cfg.Debug. Optional -- a StringEnvVar with no Dest is purely
 	// informational, shown in help but not resolved into anything (the
 	// consuming application reads it itself, e.g. via os.Getenv).
-	Dest Value
+	Dest *string
 
-	// Default is shown in the help text as "(default: ...)" and is
-	// assigned to Dest before Env is considered.
-	Default any
+	// Default is assigned to Dest when the environment variable is not
+	// set. Its zero value ("") applies just like any other value -- see
+	// StringArgument.Default.
+	Default string
 }
 
-// validateDefaultType checks that def, when set, matches the Go type
-// expected by dest's constructor (StringVar -> string, BoolVar -> bool,
-// IntVar -> int). Only a standalone EnvVar still needs this check --
-// its Dest/Default pair is untyped (Value/any), unlike Argument/
-// Option's typed Dest/Default fields (e.g. StringOption's *string/
-// string), which the compiler already keeps in sync. Custom Value
-// implementations -- ones not created by cli4go's own constructors --
-// are not checked here, since cli4go has no way to know what type they
-// expect.
-func validateDefaultType(dest Value, def any) error {
-	if dest == nil || def == nil {
-		return nil
-	}
+func (e *StringEnvVar) name() string { return e.Name }
+func (e *StringEnvVar) help() string { return e.Help }
+func (e *StringEnvVar) env() string  { return e.Name }
 
-	switch dest.(type) {
-	case *stringValue:
-		if _, ok := def.(string); !ok {
-			return fmt.Errorf("cli: Default %v (%T) is not a string, but Dest is bound via StringVar", def, def)
-		}
-	case *boolValue:
-		if _, ok := def.(bool); !ok {
-			return fmt.Errorf("cli: Default %v (%T) is not a bool, but Dest is bound via BoolVar", def, def)
-		}
-	case *intValue:
-		if _, ok := def.(int); !ok {
-			return fmt.Errorf("cli: Default %v (%T) is not an int, but Dest is bound via IntVar", def, def)
-		}
-	}
+func (e *StringEnvVar) validate() error { return envVarValidate(e) }
 
+func (e *StringEnvVar) set(s string) error {
+	if e.Dest != nil {
+		*e.Dest = s
+	}
 	return nil
+}
+
+func (e *StringEnvVar) setDefault() {
+	if e.Dest != nil {
+		*e.Dest = e.Default
+	}
 }
