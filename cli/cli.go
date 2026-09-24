@@ -123,7 +123,7 @@ func (c *Command) stderr() io.Writer {
 // A built-in is suppressed -- not yielded at all -- when the
 // user-declared Options claim both of its normalized forms, on one
 // Option or on two. A partial claim (only -h, or only --help) does not
-// suppress it: it collides, and validateOptions rejects the duplicate.
+// suppress it: it collides, and Validate rejects the duplicate.
 //
 // The version built-in has one extra rule: when -v is claimed but not
 // --version, it is yielded with -V as its short form instead (-v is
@@ -160,8 +160,8 @@ func (c *Command) options() iter.Seq[Option] {
 		}
 
 		// Suppress the help built-in only when both of its forms are
-		// claimed; a partial claim leaves it intact, and
-		// validateOptions reports the duplicate.
+		// claimed; a partial claim leaves it intact, and Validate
+		// reports the duplicate.
 		if !(takenFlags["-h"] && takenLongs["--help"]) {
 			if !yield(&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Print help",
@@ -253,17 +253,17 @@ func (c *Command) items(scope int) iter.Seq[item] {
 //
 // Checks, in order:
 //  1. Command.Name non-empty.
-//  2. Normalized Flag and Long unique across the effective Option set
-//     (options(): the user-declared Options plus the built-ins that
-//     survive suppression), so a partial claim on a built-in's forms is
-//     a conflict; see options' doc comment.
-//  3. For every item -- Arguments, effective Options, then EnvVars --
-//     its own structure: Argument.Name and EnvVar.Name non-empty, an
-//     Option with a Flag and/or Long, a Flag exactly 2 characters.
-//  4. Environment variable names (Arguments' Env, Options' Env, and
-//     EnvVars) unique across all three families, and every item's
-//     name() (an Option's defaults to Long/Flag without its dashes)
-//     unique across all of them, since a name identifies one item.
+//  2. For every item -- Arguments, the effective Options (options():
+//     the user-declared ones plus the built-ins that survive
+//     suppression), then EnvVars -- its own structure: Argument.Name
+//     and EnvVar.Name non-empty, an Option with a Flag and/or Long, a
+//     Flag exactly 2 characters.
+//  3. Uniqueness across all of those items: environment variable names
+//     (Arguments' Env, Options' Env, and EnvVars); normalized Flag and
+//     Long forms, so a partial claim on a built-in's forms is a real
+//     conflict (see options' doc comment); and every item's name() (an
+//     Option's defaults to Long/Flag without its dashes), since a name
+//     identifies one item.
 //
 // Dest and Action are not checked against each other -- an Option may
 // set neither, either, or both (see Option.Action's doc comment for
@@ -279,20 +279,15 @@ func (c *Command) Validate() *Error {
 		return newError(1, "cli: Command.Name must not be empty")
 	}
 
-	// Flag/Long uniqueness runs over the effective Option set, so a
-	// user-declared Option colliding with a built-in is caught like any
-	// other duplicate. It runs first so a shared Flag is reported as
-	// such, not as the duplicate name the two Options also derive.
-	if err := validateOptions(slices.Collect(c.options())); err != nil {
-		return newError(1, "%s", err)
-	}
-
 	// One pass over every item, built-ins included: its own structure,
-	// then the uniqueness rules that cross families. The environment
-	// variable is checked first so two EnvVars sharing a name (also
-	// their variable) report as a duplicate environment variable.
-	names := make(map[string]bool)
+	// then the uniqueness rules, from the most to the least specific
+	// claim. That order is what reports two EnvVars sharing a name (also
+	// their variable) as a duplicate environment variable, and two
+	// Options sharing only a Flag as a duplicate Flag rather than as the
+	// duplicate name they also derive.
 	envs := make(map[string]bool)
+	forms := make(map[string]bool)
+	names := make(map[string]bool)
 	for it := range c.items(withBuiltins) {
 		if err := it.validate(); err != nil {
 			return newError(1, "%s", err)
@@ -303,6 +298,27 @@ func (c *Command) Validate() *Error {
 				return newError(1, "cli: duplicate environment variable %q", env)
 			}
 			envs[env] = true
+		}
+
+		// Only an Option has Flag/Long forms. A user-declared Option
+		// claiming just one of a built-in's forms collides with it here
+		// like any other duplicate. A normalized Flag and Long never
+		// collide with each other (a Flag is 2 characters, a Long starts
+		// with "--"), so one map holds both.
+		if opt, ok := it.(Option); ok {
+			if flag := opt.flag(); flag != "" {
+				if forms[flag] {
+					return newError(1, "cli: duplicate option flag form %q", flag)
+				}
+				forms[flag] = true
+			}
+
+			if long := opt.long(); long != "" {
+				if forms[long] {
+					return newError(1, "cli: duplicate option long form %q", long)
+				}
+				forms[long] = true
+			}
 		}
 
 		// A name identifies exactly one item, so it can be looked up

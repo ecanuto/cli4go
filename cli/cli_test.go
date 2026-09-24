@@ -531,10 +531,9 @@ func TestItems_StopsEarly(t *testing.T) {
 
 // --- Validate ----------------------------------------------------------------
 
-// TestValidate covers Validate end to end: the Command.Name check, the
-// Flag/Long uniqueness check over the effective Option set, and the
-// pass over every item -- its own structure, then the environment
-// variable and name uniqueness rules that cross families. The
+// TestValidate covers Validate end to end: the Command.Name check and
+// the pass over every item -- its own structure, then the uniqueness
+// rules for environment variable names, Flag/Long forms, and names. The
 // per-item rules themselves are also covered next to each type, in
 // TestArgument_Validate, TestOption_Validate, and TestEnvVar_Validate.
 func TestValidate(t *testing.T) {
@@ -772,12 +771,44 @@ func TestValidate(t *testing.T) {
 
 		// Flag/Long uniqueness, and the built-ins' suppression rules.
 		{
+			name: "valid, distinct Flags and Longs",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Flag: "-f", Long: "--foo"},
+					&StringOption{Flag: "-b"},
+				},
+			},
+		},
+		{
 			name: "duplicate Flag is reported before the name it also derives",
 			cmd: Command{
 				Name: "myprogram",
 				Options: []Option{
 					&StringOption{Flag: "-f"},
 					&StringOption{Flag: "-f"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate Flag, different spelling normalizes the same",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Name: "a", Flag: "f"},
+					&StringOption{Name: "b", Flag: "-f"},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate Long, different spelling normalizes the same",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Name: "a", Long: "bar"},
+					&StringOption{Name: "b", Long: "--bar"},
 				},
 			},
 			wantErr: true,
