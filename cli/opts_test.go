@@ -76,7 +76,7 @@ func TestOptionName(t *testing.T) {
 // TestIntOption_Accessors covers the IntOption accessors the rest of the
 // suite happens not to reach: Parse/Validate/HelpString already exercise
 // name()/flag()/long() (via the various "-n" test cases), but none of
-// them touch help() or action() when unset.
+// them touch help(), action(), or required() when unset.
 func TestIntOption_Accessors(t *testing.T) {
 	o := &IntOption{Name: "count", Flag: "-n", Help: "How many"}
 	if got := o.name(); got != "count" {
@@ -87,6 +87,23 @@ func TestIntOption_Accessors(t *testing.T) {
 	}
 	if got := o.action(); got != nil {
 		t.Errorf("action() = %v, want nil, unset", got)
+	}
+	if got := o.required(); got != false {
+		t.Errorf("required() = %v, want false, unset", got)
+	}
+	if got := (&IntOption{Required: true}).required(); got != true {
+		t.Errorf("required() = %v, want true", got)
+	}
+}
+
+// TestBoolOption_Required covers required(), which Parse's TestParse_Required
+// only exercises for StringOption and StringArgument.
+func TestBoolOption_Required(t *testing.T) {
+	if got := (&BoolOption{}).required(); got != false {
+		t.Errorf("required() = %v, want false, unset", got)
+	}
+	if got := (&BoolOption{Required: true}).required(); got != true {
+		t.Errorf("required() = %v, want true", got)
 	}
 }
 
