@@ -2278,6 +2278,85 @@ func TestParse_Resolution(t *testing.T) {
 	})
 }
 
+// TestParse_Required covers Required Arguments and Options: Parse fails
+// with a code-2 usage error when one is resolved from neither the
+// command line nor Env, and succeeds -- exactly like a non-Required item
+// -- when either one supplies it. EnvVar has no Required field (its
+// only source is already the environment, so "required" wouldn't add
+// anything), so it is not covered here.
+func TestParse_Required(t *testing.T) {
+	t.Run("a missing Required Option is a usage error", func(t *testing.T) {
+		var s string
+		var buf bytes.Buffer
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{&StringOption{Flag: "-s", Dest: &s, Required: true}},
+			Stderr:  &buf,
+		}
+		err := c.Parse(nil)
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+	})
+
+	t.Run("a missing Required Argument is a usage error", func(t *testing.T) {
+		var s string
+		var buf bytes.Buffer
+		c := &Command{
+			Name:      "myprogram",
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &s, Required: true}},
+			Stderr:    &buf,
+		}
+		err := c.Parse(nil)
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+	})
+
+	t.Run("a Required Option set on the command line is not an error", func(t *testing.T) {
+		var s string
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{&StringOption{Flag: "-s", Dest: &s, Required: true}},
+		}
+		if err := c.Parse([]string{"-s", "hi"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "hi" {
+			t.Errorf("Dest = %q, want %q", s, "hi")
+		}
+	})
+
+	t.Run("a Required Argument set on the command line is not an error", func(t *testing.T) {
+		var s string
+		c := &Command{
+			Name:      "myprogram",
+			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &s, Required: true}},
+		}
+		if err := c.Parse([]string{"hi"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "hi" {
+			t.Errorf("Dest = %q, want %q", s, "hi")
+		}
+	})
+
+	t.Run("a Required Option resolved via Env is not an error", func(t *testing.T) {
+		var s string
+		t.Setenv("APP_S", "from-env")
+		c := &Command{
+			Name:    "myprogram",
+			Options: []Option{&StringOption{Flag: "-s", Env: "APP_S", Dest: &s, Required: true}},
+		}
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "from-env" {
+			t.Errorf("Dest = %q, want %q", s, "from-env")
+		}
+	})
+}
+
 // TestSetDefault covers every typed Argument/Option's setDefault: it
 // assigns Default straight to Dest -- the zero value included -- and
 // does nothing when Dest is unset.

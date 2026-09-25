@@ -25,6 +25,7 @@ import (
 // never collide.
 type Argument interface {
 	item
+	required() bool
 }
 
 // argumentValidate is the base behavior behind every Argument
@@ -66,11 +67,18 @@ type StringArgument struct {
 	// Env, if set, is the environment variable consulted when this
 	// argument is not provided on the command line.
 	Env string
+
+	// Required makes Parse fail with a usage error (ExitCode() == 2)
+	// when this argument is resolved from neither the command line nor
+	// Env. Not meant to be combined with a non-zero Default; not
+	// validated, since Default would just be dead code, not a bug.
+	Required bool
 }
 
 func (a *StringArgument) name() string       { return a.Name }
 func (a *StringArgument) help() string       { return a.Help }
 func (a *StringArgument) env() string        { return a.Env }
+func (a *StringArgument) required() bool     { return a.Required }
 func (a *StringArgument) validate() error    { return argumentValidate(a) }
 func (a *StringArgument) set(s string) error { return setDest(a.Dest, s, parseString) }
 func (a *StringArgument) setDefault()        { setDestDefault(a.Dest, a.Default) }
@@ -97,11 +105,15 @@ type IntArgument struct {
 
 	// Env -- see StringArgument.Env.
 	Env string
+
+	// Required -- see StringArgument.Required.
+	Required bool
 }
 
 func (a *IntArgument) name() string       { return a.Name }
 func (a *IntArgument) help() string       { return a.Help }
 func (a *IntArgument) env() string        { return a.Env }
+func (a *IntArgument) required() bool     { return a.Required }
 func (a *IntArgument) validate() error    { return argumentValidate(a) }
 func (a *IntArgument) set(s string) error { return setDest(a.Dest, s, parseInt) }
 func (a *IntArgument) setDefault()        { setDestDefault(a.Dest, a.Default) }

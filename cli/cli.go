@@ -48,6 +48,11 @@ type item interface {
 	setDefault()
 }
 
+// requirable is satisfied by Argument and Option, not by EnvVar.
+type requirable interface {
+	required() bool
+}
+
 // Command describes a complete command-line interface: its identity
 // (Name/Version/Description), its positional Arguments, its Options
 // (flags), and its standalone EnvVars. A Command is plain data — build
@@ -265,6 +270,9 @@ func (c *Command) items(scope int) iter.Seq[item] {
 //     Option's defaults to Long/Flag without its dashes), since a name
 //     identifies one item.
 //
+// Required and a non-zero Default are not checked against each other --
+// see Required's doc comment.
+//
 // Dest and Action are not checked against each other -- an Option may
 // set neither, either, or both (see Option.Action's doc comment for
 // what setting both means for Parse's dispatch order).
@@ -365,13 +373,14 @@ func (c *Command) Validate() *Error {
 //   - a code-1 failure (ExitCode() == 1): the Command itself was
 //     declared incorrectly, as reported by Validate(). Nothing is
 //     printed.
-//   - a real parsing/usage error (ExitCode() == 2): an unknown or
-//     invalid or repeated option/argument, including a bad Env value, or whatever
-//     *Error a caller-declared Option's Action chose to return. Parse
-//     prints a clap-style block to c.Stderr before returning (see
-//     below) for everything except an Action's own *Error, which
-//     Parse returns exactly as given -- an Action that wants that
-//     same clap-style block builds it itself via c.PrintErrorf.
+//   - a real parsing/usage error (ExitCode() == 2): an unknown, invalid,
+//     repeated, or missing-but-Required option/argument, including a
+//     bad Env value, or whatever *Error a caller-declared Option's
+//     Action chose to return. Parse prints a clap-style block to
+//     c.Stderr before returning (see below) for everything except an
+//     Action's own *Error, which Parse returns exactly as given -- an
+//     Action that wants that same clap-style block builds it itself via
+//     c.PrintErrorf.
 //
 // For a real parsing/usage error Parse builds itself, Parse prints (via
 // PrintErrorf -- see its doc comment):
@@ -513,6 +522,11 @@ func (c *Command) Parse(args []string) *Error {
 				}
 				continue
 			}
+		}
+
+		// EnvVar has no Required field, so it always falls through.
+		if r, ok := it.(requirable); ok && r.required() {
+			return c.PrintErrorf("%q is required", it.name())
 		}
 		it.setDefault()
 	}

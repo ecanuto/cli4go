@@ -23,6 +23,7 @@ type Option interface {
 	flag() string
 	long() string
 	action() Action
+	required() bool
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, whatever
@@ -123,6 +124,12 @@ type StringOption struct {
 	// command line -- see the Action doc comment for its exact contract
 	// and how it combines with Dest.
 	Action Action
+
+	// Required makes Parse fail with a usage error (ExitCode() == 2)
+	// when this option is resolved from neither the command line nor
+	// Env. Not meant to be combined with a non-zero Default; not
+	// validated, since Default would just be dead code, not a bug.
+	Required bool
 }
 
 func (o *StringOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
@@ -131,6 +138,7 @@ func (o *StringOption) long() string       { return normalizeDashes(o.Long, 2) }
 func (o *StringOption) help() string       { return o.Help }
 func (o *StringOption) env() string        { return o.Env }
 func (o *StringOption) action() Action     { return o.Action }
+func (o *StringOption) required() bool     { return o.Required }
 func (o *StringOption) validate() error    { return optionValidate(o) }
 func (o *StringOption) set(s string) error { return setDest(o.Dest, s, parseString) }
 func (o *StringOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
@@ -168,6 +176,9 @@ type IntOption struct {
 
 	// Action -- see StringOption.Action.
 	Action Action
+
+	// Required -- see StringOption.Required.
+	Required bool
 }
 
 func (o *IntOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
@@ -176,6 +187,7 @@ func (o *IntOption) long() string       { return normalizeDashes(o.Long, 2) }
 func (o *IntOption) help() string       { return o.Help }
 func (o *IntOption) env() string        { return o.Env }
 func (o *IntOption) action() Action     { return o.Action }
+func (o *IntOption) required() bool     { return o.Required }
 func (o *IntOption) validate() error    { return optionValidate(o) }
 func (o *IntOption) set(s string) error { return setDest(o.Dest, s, parseInt) }
 func (o *IntOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
@@ -211,6 +223,9 @@ type BoolOption struct {
 
 	// Action -- see StringOption.Action.
 	Action Action
+
+	// Required -- see StringOption.Required.
+	Required bool
 }
 
 func (o *BoolOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
@@ -219,6 +234,7 @@ func (o *BoolOption) long() string       { return normalizeDashes(o.Long, 2) }
 func (o *BoolOption) help() string       { return o.Help }
 func (o *BoolOption) env() string        { return o.Env }
 func (o *BoolOption) action() Action     { return o.Action }
+func (o *BoolOption) required() bool     { return o.Required }
 func (o *BoolOption) validate() error    { return optionValidate(o) }
 func (o *BoolOption) set(s string) error { return setDest(o.Dest, s, parseBool) }
 func (o *BoolOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
