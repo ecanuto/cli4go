@@ -8,7 +8,9 @@ import (
 // parseString, parseInt and parseBool are the string -> Go value
 // conversions behind the typed Argument/Option/EnvVar family's Set
 // methods (see setDest), so the error messages live in one place.
-func parseString(s string) (string, error) { return s, nil }
+func parseString(s string) (string, error) {
+	return s, nil
+}
 
 func parseInt(s string) (int, error) {
 	n, err := strconv.Atoi(s)
