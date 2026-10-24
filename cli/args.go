@@ -40,12 +40,6 @@ type Argument interface {
 	// neither the command line nor GetEnv's variable sets this Argument.
 	GetRequired() bool
 
-	// Validate reports a structural problem with this Argument on its own,
-	// independent of any other item -- an empty Name, for instance.
-	// Cross-item rules (unique names and environment variable names) stay
-	// in Command.Validate.
-	Validate() error
-
 	// Set parses s into Dest, the token Parse (or an Env lookup) just
 	// resolved for this Argument. It returns whatever conversion error the
 	// concrete type produces (none for a string), and does nothing --
@@ -57,6 +51,12 @@ type Argument interface {
 	// the same Go type. The zero value applies too, like any other Default
 	// (see StringArgument's Default doc comment).
 	SetDefault()
+
+	// Validate reports a structural problem with this Argument on its own,
+	// independent of any other item -- an empty Name, for instance.
+	// Cross-item rules (unique names and environment variable names) stay
+	// in Command.Validate.
+	Validate() error
 }
 
 // --- ArgumentOf --------------------------------------------------------------
@@ -95,16 +95,12 @@ type ArgumentOf[T any, P Parser[T]] struct {
 	Required bool
 }
 
-func (a *ArgumentOf[T, P]) GetName() string   { return a.Name }
-func (a *ArgumentOf[T, P]) GetHelp() string   { return a.Help }
-func (a *ArgumentOf[T, P]) GetEnv() string    { return a.Env }
-func (a *ArgumentOf[T, P]) GetRequired() bool { return a.Required }
-func (a *ArgumentOf[T, P]) Set(s string) error {
-	var p P
-	return setDest(a.Dest, s, p.Parse)
-}
-
-func (a *ArgumentOf[T, P]) SetDefault() { setDestDefault(a.Dest, a.Default) }
+func (a *ArgumentOf[T, P]) GetName() string    { return a.Name }
+func (a *ArgumentOf[T, P]) GetHelp() string    { return a.Help }
+func (a *ArgumentOf[T, P]) GetEnv() string     { return a.Env }
+func (a *ArgumentOf[T, P]) GetRequired() bool  { return a.Required }
+func (a *ArgumentOf[T, P]) Set(s string) error { return setDest(a.Dest, s, parseWith[T, P]) }
+func (a *ArgumentOf[T, P]) SetDefault()        { setDestDefault(a.Dest, a.Default) }
 
 // Validate requires a display name, which shows in the usage line and
 // the "Arguments:" help section.

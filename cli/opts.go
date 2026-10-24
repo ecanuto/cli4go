@@ -49,12 +49,6 @@ type Option interface {
 	// neither the command line nor GetEnv's variable sets this Option.
 	GetRequired() bool
 
-	// Validate reports a structural problem with this Option on its own,
-	// independent of any other item -- a missing Flag/Long, for instance.
-	// Cross-item rules (unique names, forms, and environment variable
-	// names) stay in Command.Validate.
-	Validate() error
-
 	// Set parses s into Dest, the token Parse (or an Env lookup) just
 	// resolved for this Option. It returns whatever conversion error the
 	// concrete type produces, and does nothing -- returning nil -- when
@@ -65,6 +59,12 @@ type Option interface {
 	// string round trip, and it can never fail, since Default and Dest are
 	// the same Go type. The zero value applies too, like any other Default.
 	SetDefault()
+
+	// Validate reports a structural problem with this Option on its own,
+	// independent of any other item -- a missing Flag/Long, for instance.
+	// Cross-item rules (unique names, forms, and environment variable
+	// names) stay in Command.Validate.
+	Validate() error
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, whatever
@@ -153,19 +153,15 @@ type OptionOf[T any, P Parser[T]] struct {
 	Required bool
 }
 
-func (o *OptionOf[T, P]) GetName() string   { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
-func (o *OptionOf[T, P]) GetFlag() string   { return normalizeDashes(o.Flag, 1) }
-func (o *OptionOf[T, P]) GetLong() string   { return normalizeDashes(o.Long, 2) }
-func (o *OptionOf[T, P]) GetHelp() string   { return o.Help }
-func (o *OptionOf[T, P]) GetEnv() string    { return o.Env }
-func (o *OptionOf[T, P]) GetAction() Action { return o.Action }
-func (o *OptionOf[T, P]) GetRequired() bool { return o.Required }
-func (o *OptionOf[T, P]) Set(s string) error {
-	var p P
-	return setDest(o.Dest, s, p.Parse)
-}
-
-func (o *OptionOf[T, P]) SetDefault() { setDestDefault(o.Dest, o.Default) }
+func (o *OptionOf[T, P]) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
+func (o *OptionOf[T, P]) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *OptionOf[T, P]) GetLong() string    { return normalizeDashes(o.Long, 2) }
+func (o *OptionOf[T, P]) GetHelp() string    { return o.Help }
+func (o *OptionOf[T, P]) GetEnv() string     { return o.Env }
+func (o *OptionOf[T, P]) GetAction() Action  { return o.Action }
+func (o *OptionOf[T, P]) GetRequired() bool  { return o.Required }
+func (o *OptionOf[T, P]) Set(s string) error { return setDest(o.Dest, s, parseWith[T, P]) }
+func (o *OptionOf[T, P]) SetDefault()        { setDestDefault(o.Dest, o.Default) }
 
 // Validate checks the normalized flag and long forms.
 func (o *OptionOf[T, P]) Validate() error {

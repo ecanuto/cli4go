@@ -43,6 +43,13 @@ func (boolParser) Parse(s string) (bool, error) {
 	return b, nil
 }
 
+// parseWith converts s with the Parser P. It is the parse function behind
+// every generic item's Set method.
+func parseWith[T any, P Parser[T]](s string) (T, error) {
+	var p P
+	return p.Parse(s)
+}
+
 // setDest converts s with parse and stores the result in dest, doing
 // nothing -- and returning nil -- when dest is unset. It is the base
 // behavior behind every item's Set method: only parse differs

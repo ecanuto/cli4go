@@ -32,12 +32,6 @@ type EnvVar interface {
 	// environment variable is not set.
 	GetRequired() bool
 
-	// Validate reports a structural problem with this EnvVar on its own,
-	// independent of any other item -- an empty Name, for instance.
-	// Cross-item rules (unique names and environment variable names) stay
-	// in Command.Validate.
-	Validate() error
-
 	// Set parses s into Dest, the value of the environment variable. It
 	// returns whatever conversion error the concrete type produces (none
 	// for a string), and does nothing -- returning nil -- when Dest is
@@ -49,6 +43,12 @@ type EnvVar interface {
 	// Default and Dest are the same Go type. The zero value applies too,
 	// like any other Default.
 	SetDefault()
+
+	// Validate reports a structural problem with this EnvVar on its own,
+	// independent of any other item -- an empty Name, for instance.
+	// Cross-item rules (unique names and environment variable names) stay
+	// in Command.Validate.
+	Validate() error
 }
 
 // --- EnvVarOf ----------------------------------------------------------------
@@ -82,16 +82,12 @@ type EnvVarOf[T any, P Parser[T]] struct {
 	Required bool
 }
 
-func (e *EnvVarOf[T, P]) GetName() string   { return e.Name }
-func (e *EnvVarOf[T, P]) GetHelp() string   { return e.Help }
-func (e *EnvVarOf[T, P]) GetEnv() string    { return e.Name }
-func (e *EnvVarOf[T, P]) GetRequired() bool { return e.Required }
-func (e *EnvVarOf[T, P]) Set(s string) error {
-	var p P
-	return setDest(e.Dest, s, p.Parse)
-}
-
-func (e *EnvVarOf[T, P]) SetDefault() { setDestDefault(e.Dest, e.Default) }
+func (e *EnvVarOf[T, P]) GetName() string    { return e.Name }
+func (e *EnvVarOf[T, P]) GetHelp() string    { return e.Help }
+func (e *EnvVarOf[T, P]) GetEnv() string     { return e.Name }
+func (e *EnvVarOf[T, P]) GetRequired() bool  { return e.Required }
+func (e *EnvVarOf[T, P]) Set(s string) error { return setDest(e.Dest, s, parseWith[T, P]) }
+func (e *EnvVarOf[T, P]) SetDefault()        { setDestDefault(e.Dest, e.Default) }
 
 // Validate requires a name, since the name is the environment variable
 // itself.

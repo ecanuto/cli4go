@@ -29,9 +29,9 @@ type item interface {
 	GetHelp() string
 	GetEnv() string
 	GetRequired() bool
-	Validate() error
 	Set(s string) error
 	SetDefault()
+	Validate() error
 }
 
 // Command describes a complete command-line interface: its identity
