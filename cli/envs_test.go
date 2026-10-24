@@ -10,6 +10,12 @@ import (
 // Name doubles as the environment variable it reads (GetEnv()).
 func TestStringEnvVar_Accessors(t *testing.T) {
 	e := &StringEnvVar{Name: "APP_DEBUG", Help: "Enable debug logging"}
+	if got := e.GetRequired(); got != false {
+		t.Errorf("GetRequired() = %v, want false, unset", got)
+	}
+	if got := (&StringEnvVar{Name: "APP_X", Required: true}).GetRequired(); got != true {
+		t.Errorf("GetRequired() = %v, want true", got)
+	}
 	if got := e.GetName(); got != "APP_DEBUG" {
 		t.Errorf("GetName() = %q, want %q", got, "APP_DEBUG")
 	}

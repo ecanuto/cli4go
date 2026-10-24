@@ -2278,12 +2278,11 @@ func TestParse_Resolution(t *testing.T) {
 	})
 }
 
-// TestParse_Required covers Required Arguments and Options: Parse fails
-// with a code-2 usage error when one is resolved from neither the
-// command line nor Env, and succeeds -- exactly like a non-Required item
-// -- when either one supplies it. EnvVar has no Required field (its
-// only source is already the environment, so "required" wouldn't add
-// anything), so it is not covered here.
+// TestParse_Required covers Required Arguments, Options, and EnvVars:
+// Parse fails with a code-2 usage error when one is resolved from
+// neither the command line nor Env (for an EnvVar, from the environment
+// alone), and succeeds -- exactly like a non-Required item -- when
+// either one supplies it.
 func TestParse_Required(t *testing.T) {
 	t.Run("a missing Required Option is a usage error", func(t *testing.T) {
 		var s string
@@ -2347,6 +2346,35 @@ func TestParse_Required(t *testing.T) {
 		c := &Command{
 			Name:    "myprogram",
 			Options: []Option{&StringOption{Flag: "-s", Env: "APP_S", Dest: &s, Required: true}},
+		}
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if s != "from-env" {
+			t.Errorf("Dest = %q, want %q", s, "from-env")
+		}
+	})
+
+	t.Run("a missing Required EnvVar is a usage error", func(t *testing.T) {
+		var s string
+		var buf bytes.Buffer
+		c := &Command{
+			Name:    "myprogram",
+			EnvVars: []EnvVar{&StringEnvVar{Name: "APP_SURELY_UNSET_REQ", Dest: &s, Required: true}},
+			Stderr:  &buf,
+		}
+		err := c.Parse(nil)
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a code-2 error", err)
+		}
+	})
+
+	t.Run("a Required EnvVar set in the environment is not an error", func(t *testing.T) {
+		t.Setenv("APP_REQ", "from-env")
+		var s string
+		c := &Command{
+			Name:    "myprogram",
+			EnvVars: []EnvVar{&StringEnvVar{Name: "APP_REQ", Dest: &s, Required: true}},
 		}
 		if err := c.Parse(nil); err != nil {
 			t.Fatalf("Parse() = %v, want nil", err)

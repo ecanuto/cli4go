@@ -28,14 +28,10 @@ type item interface {
 	GetName() string
 	GetHelp() string
 	GetEnv() string
+	GetRequired() bool
 	Validate() error
 	Set(s string) error
 	SetDefault()
-}
-
-// requirable is satisfied by Argument and Option, not by EnvVar.
-type requirable interface {
-	GetRequired() bool
 }
 
 // Command describes a complete command-line interface: its identity
@@ -509,8 +505,8 @@ func (c *Command) Parse(args []string) *Error {
 			}
 		}
 
-		// EnvVar has no Required field, so it always falls through.
-		if r, ok := it.(requirable); ok && r.GetRequired() {
+		// Neither the command line nor the environment supplied a value.
+		if it.GetRequired() {
 			return c.PrintErrorf("%q is required", it.GetName())
 		}
 		it.SetDefault()

@@ -27,6 +27,10 @@ type EnvVar interface {
 	// same as GetName.
 	GetEnv() string
 
+	// GetRequired reports whether Parse fails with a usage error when the
+	// environment variable is not set.
+	GetRequired() bool
+
 	// Validate reports a structural problem with this EnvVar on its own,
 	// independent of any other item -- an empty Name, for instance.
 	// Cross-item rules (unique names and environment variable names) stay
@@ -80,11 +84,18 @@ type StringEnvVar struct {
 	// set. Its zero value ("") applies just like any other value -- see
 	// StringArgument.Default.
 	Default string
+
+	// Required makes Parse fail with a usage error (ExitCode() == 2)
+	// when the environment variable is not set. Not meant to be combined
+	// with a non-zero Default; not validated, since Default would just be
+	// dead code, not a bug.
+	Required bool
 }
 
 func (e *StringEnvVar) GetName() string    { return e.Name }
 func (e *StringEnvVar) GetHelp() string    { return e.Help }
 func (e *StringEnvVar) GetEnv() string     { return e.Name }
+func (e *StringEnvVar) GetRequired() bool  { return e.Required }
 func (e *StringEnvVar) Validate() error    { return envVarValidate(e) }
 func (e *StringEnvVar) Set(s string) error { return setDest(e.Dest, s, parseString) }
 func (e *StringEnvVar) SetDefault()        { setDestDefault(e.Dest, e.Default) }
