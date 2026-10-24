@@ -576,15 +576,20 @@ func (c *Command) PrintErrorf(format string, args ...any) *Error {
 // with the Arguments / Options / Environment Variables sections -- see
 // HelpString.
 func (c *Command) UsageString() string {
-	// Build the "[arg1] [arg2] ..." part of the usage line from the
-	// Command's Arguments. Options are always represented by the
-	// "[options]" placeholder, so they don't need to be listed here.
+	// Build the "arg1 [arg2] ..." part of the usage line from the
+	// Command's Arguments: an optional Argument is bracketed, a Required
+	// one is not. Options are always represented by the "[options]"
+	// placeholder, so they don't need to be listed here.
 	var args strings.Builder
 	for _, arg := range c.Arguments {
-		fmt.Fprintf(&args, " [%s]", arg.GetName())
+		if arg.GetRequired() {
+			fmt.Fprintf(&args, " %s", arg.GetName())
+		} else {
+			fmt.Fprintf(&args, " [%s]", arg.GetName())
+		}
 	}
 
-	// The usage line is always "Usage: <program name> [options] [arg1] [arg2] ..."
+	// The usage line is always "Usage: <program name> [options] arg1 [arg2] ..."
 	return fmt.Sprintf("Usage: %s [options]%s\n", c.Name, args.String())
 }
 

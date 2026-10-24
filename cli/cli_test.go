@@ -1755,6 +1755,18 @@ func TestUsageString(t *testing.T) {
 			want: "Usage: myprogram [options] [qux] [quux]\n",
 		},
 		{
+			// Brackets mean optional, so a Required Argument is bare.
+			name: "required argument is not bracketed",
+			cmd: Command{
+				Name: "myprogram",
+				Arguments: []Argument{
+					&StringArgument{Name: "qux", Required: true},
+					&StringArgument{Name: "quux"},
+				},
+			},
+			want: "Usage: myprogram [options] qux [quux]\n",
+		},
+		{
 			// Options never affects the usage line beyond the constant
 			// "[options]" token -- individual flags are only spelled
 			// out in HelpString's "Options:" section.
