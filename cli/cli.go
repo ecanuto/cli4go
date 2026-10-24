@@ -21,36 +21,36 @@ import (
 // (positional order, Flag/Long, Action) lives on Argument and Option
 // themselves.
 type item interface {
-	name() string
-	help() string
+	GetName() string
+	GetHelp() string
 
-	// env returns the name of the environment variable this item falls
+	// GetEnv returns the name of the environment variable this item falls
 	// back to when the command line does not set it, or "" if none. An
-	// EnvVar's env is its own name.
-	env() string
+	// EnvVar's GetEnv is its own name.
+	GetEnv() string
 
-	// validate reports a structural problem with this item on its own,
+	// Validate reports a structural problem with this item on its own,
 	// independent of any other item -- an empty Name, a missing
 	// Flag/Long, ... Cross-item rules (unique names, flags, and
 	// environment variable names) stay in the Command-level checks.
-	validate() error
+	Validate() error
 
-	// set parses s into Dest, the token Parse (or an Env lookup) just
+	// Set parses s into Dest, the token Parse (or an Env lookup) just
 	// resolved for this item. It returns whatever conversion error the
 	// concrete type produces (none for a string), and does nothing --
 	// returning nil -- when Dest is unset.
-	set(s string) error
+	Set(s string) error
 
-	// setDefault assigns Default to Dest directly, when Dest is set --
+	// SetDefault assigns Default to Dest directly, when Dest is set --
 	// no string round trip, and it can never fail, since Default and
 	// Dest are the same Go type. The zero value applies too, like any
 	// other Default (see StringArgument's Default doc comment).
-	setDefault()
+	SetDefault()
 }
 
 // requirable is satisfied by Argument and Option, not by EnvVar.
 type requirable interface {
-	required() bool
+	GetRequired() bool
 }
 
 // Command describes a complete command-line interface: its identity
@@ -156,10 +156,10 @@ func (c *Command) options() iter.Seq[Option] {
 		takenFlags := make(map[string]bool, len(c.Options))
 		takenLongs := make(map[string]bool, len(c.Options))
 		for _, opt := range c.Options {
-			if f := opt.flag(); f != "" {
+			if f := opt.GetFlag(); f != "" {
 				takenFlags[f] = true
 			}
-			if l := opt.long(); l != "" {
+			if l := opt.GetLong(); l != "" {
 				takenLongs[l] = true
 			}
 		}
@@ -266,7 +266,7 @@ func (c *Command) items(scope int) iter.Seq[item] {
 //  3. Uniqueness across all of those items: environment variable names
 //     (Arguments' Env, Options' Env, and EnvVars); normalized Flag and
 //     Long forms, so a partial claim on a built-in's forms is a real
-//     conflict (see options' doc comment); and every item's name() (an
+//     conflict (see options' doc comment); and every item's GetName() (an
 //     Option's defaults to Long/Flag without its dashes), since a name
 //     identifies one item.
 //
@@ -297,11 +297,11 @@ func (c *Command) Validate() *Error {
 	forms := make(map[string]bool)
 	names := make(map[string]bool)
 	for it := range c.items(withBuiltins) {
-		if err := it.validate(); err != nil {
+		if err := it.Validate(); err != nil {
 			return newError(1, "%s", err)
 		}
 
-		if env := it.env(); env != "" {
+		if env := it.GetEnv(); env != "" {
 			if envs[env] {
 				return newError(1, "cli: duplicate environment variable %q", env)
 			}
@@ -314,14 +314,14 @@ func (c *Command) Validate() *Error {
 		// collide with each other (a Flag is 2 characters, a Long starts
 		// with "--"), so one map holds both.
 		if opt, ok := it.(Option); ok {
-			if flag := opt.flag(); flag != "" {
+			if flag := opt.GetFlag(); flag != "" {
 				if forms[flag] {
 					return newError(1, "cli: duplicate option flag form %q", flag)
 				}
 				forms[flag] = true
 			}
 
-			if long := opt.long(); long != "" {
+			if long := opt.GetLong(); long != "" {
 				if forms[long] {
 					return newError(1, "cli: duplicate option long form %q", long)
 				}
@@ -332,7 +332,7 @@ func (c *Command) Validate() *Error {
 		// A name identifies exactly one item, so it can be looked up
 		// unambiguously. An Option's derived name can collide with an
 		// Argument's; an explicit Name settles it.
-		name := it.name()
+		name := it.GetName()
 		if names[name] {
 			return newError(1, "cli: duplicate name %q; set an explicit Name on one of them", name)
 		}
@@ -409,10 +409,10 @@ func (c *Command) Parse(args []string) *Error {
 	// gets two keys pointing at it.
 	opts := make(map[string]Option, (len(c.Options)+2)*2)
 	for opt := range c.options() {
-		if flag := opt.flag(); flag != "" {
+		if flag := opt.GetFlag(); flag != "" {
 			opts[flag] = opt
 		}
-		if long := opt.long(); long != "" {
+		if long := opt.GetLong(); long != "" {
 			opts[long] = opt
 		}
 	}
@@ -474,12 +474,12 @@ func (c *Command) Parse(args []string) *Error {
 
 			// Dest resolves first, if set: Action (below) receives the
 			// exact same value, and only runs at all if set succeeded.
-			if setErr := opt.set(value); setErr != nil {
+			if setErr := opt.Set(value); setErr != nil {
 				return c.PrintErrorf("option %q: %w", tok, setErr)
 			}
 
 			// See the Action doc comment for its nil/non-nil contract.
-			if action := opt.action(); action != nil {
+			if action := opt.GetAction(); action != nil {
 				if err := action(c, opt, value); err != nil {
 					return err
 				}
@@ -495,7 +495,7 @@ func (c *Command) Parse(args []string) *Error {
 			argIndex++
 			seen[arg] = true
 
-			if setErr := arg.set(tok); setErr != nil {
+			if setErr := arg.Set(tok); setErr != nil {
 				return c.PrintErrorf("argument %q: %w", tok, setErr)
 			}
 		}
@@ -515,9 +515,9 @@ func (c *Command) Parse(args []string) *Error {
 		// so each Dest is written at most once. A bad Env value is a
 		// real parsing/usage error (ExitCode() == 2), printed by
 		// PrintErrorf before it is returned.
-		if name := it.env(); name != "" {
+		if name := it.GetEnv(); name != "" {
 			if val, ok := os.LookupEnv(name); ok {
-				if err := it.set(val); err != nil {
+				if err := it.Set(val); err != nil {
 					return c.PrintErrorf("invalid value %q for environment variable %q: %w", val, name, err)
 				}
 				continue
@@ -525,10 +525,10 @@ func (c *Command) Parse(args []string) *Error {
 		}
 
 		// EnvVar has no Required field, so it always falls through.
-		if r, ok := it.(requirable); ok && r.required() {
-			return c.PrintErrorf("%q is required", it.name())
+		if r, ok := it.(requirable); ok && r.GetRequired() {
+			return c.PrintErrorf("%q is required", it.GetName())
 		}
-		it.setDefault()
+		it.SetDefault()
 	}
 
 	return nil
@@ -600,7 +600,7 @@ func (c *Command) UsageString() string {
 	// "[options]" placeholder, so they don't need to be listed here.
 	var args strings.Builder
 	for _, arg := range c.Arguments {
-		fmt.Fprintf(&args, " [%s]", arg.name())
+		fmt.Fprintf(&args, " [%s]", arg.GetName())
 	}
 
 	// The usage line is always "Usage: <program name> [options] [arg1] [arg2] ..."
@@ -639,17 +639,17 @@ func (c *Command) HelpString() string {
 	// on its own and combined below.
 	var widthArgs, widthOpts, widthEnvs int
 	for _, arg := range c.Arguments {
-		if w := len(arg.name()); w > widthArgs {
+		if w := len(arg.GetName()); w > widthArgs {
 			widthArgs = w
 		}
 	}
 	for opt := range c.options() {
-		if w := len(opt.long()) + 4; w > widthOpts { // 4 = len("-x, ")
+		if w := len(opt.GetLong()) + 4; w > widthOpts { // 4 = len("-x, ")
 			widthOpts = w
 		}
 	}
 	for it := range c.items(declaredOnly) {
-		if w := len(it.env()); w > widthEnvs {
+		if w := len(it.GetEnv()); w > widthEnvs {
 			widthEnvs = w
 		}
 	}
@@ -667,7 +667,7 @@ func (c *Command) HelpString() string {
 	if len(c.Arguments) > 0 {
 		fmt.Fprintf(&b, "\nArguments:\n")
 		for _, arg := range c.Arguments {
-			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.name(), arg.help())
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.GetName(), arg.GetHelp())
 		}
 	}
 
@@ -679,14 +679,14 @@ func (c *Command) HelpString() string {
 	// Option takes its place, so the Options section is never empty.
 	fmt.Fprintf(&b, "\nOptions:\n")
 	for opt := range c.options() {
-		flag := opt.flag()
-		long := opt.long()
+		flag := opt.GetFlag()
+		long := opt.GetLong()
 		if flag != "" && long != "" {
 			flag += ","
 		}
 		fmt.Fprintf(&b,
 			"  %-3s %-*s   %s\n",
-			flag, width-4, long, opt.help(), // 4 = len("-x, ")
+			flag, width-4, long, opt.GetHelp(), // 4 = len("-x, ")
 		)
 	}
 
@@ -695,10 +695,10 @@ func (c *Command) HelpString() string {
 	if widthEnvs > 0 {
 		fmt.Fprintf(&b, "\nEnvironment Variables:\n")
 		for it := range c.items(declaredOnly) {
-			if it.env() == "" {
+			if it.GetEnv() == "" {
 				continue
 			}
-			fmt.Fprintf(&b, "  %-*s   %s\n", width, it.env(), it.help())
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, it.GetEnv(), it.GetHelp())
 		}
 	}
 

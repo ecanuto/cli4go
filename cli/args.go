@@ -17,25 +17,26 @@ import (
 // *int/int), so there is nothing to type-switch on, and the compiler
 // keeps Default in sync with Dest for free.
 //
-// The interface itself is unexported-method-only, mirroring the
-// Option.flag()/Option.long() pattern already used elsewhere in this
-// package: a concrete type keeps its fields public (Name, Help, ...) for
-// struct-literal construction, and satisfies Argument through small
-// unexported accessor methods with different names, so field and method
-// never collide.
+// The interface's accessors are exported (GetName, GetHelp, ...) so a
+// value held only as Argument (e.g. from Command.Arguments) can still be
+// read without a type assertion to its concrete struct; each concrete
+// type also keeps its fields public (Name, Help, ...) for struct-literal
+// construction. The Get prefix, mirrored by Option.GetFlag/Option.GetLong
+// elsewhere in this package, is what keeps field and method from
+// colliding -- a plain Name() would clash with the Name field.
 type Argument interface {
 	item
-	required() bool
+	GetRequired() bool
 }
 
 // argumentValidate is the base behavior behind every Argument
-// implementation's validate() method (the closest thing Go has to a
-// parent-class call: a concrete type's validate() calls it first, then
+// implementation's Validate() method (the closest thing Go has to a
+// parent-class call: a concrete type's Validate() calls it first, then
 // adds any rule of its own): every Argument needs a display name, which
 // shows in the usage line and the "Arguments:" help section. It never
-// calls a.validate().
+// calls a.Validate().
 func argumentValidate(a Argument) error {
-	if a.name() == "" {
+	if a.GetName() == "" {
 		return errors.New("cli: Argument.Name must not be empty")
 	}
 	return nil
@@ -75,13 +76,13 @@ type StringArgument struct {
 	Required bool
 }
 
-func (a *StringArgument) name() string       { return a.Name }
-func (a *StringArgument) help() string       { return a.Help }
-func (a *StringArgument) env() string        { return a.Env }
-func (a *StringArgument) required() bool     { return a.Required }
-func (a *StringArgument) validate() error    { return argumentValidate(a) }
-func (a *StringArgument) set(s string) error { return setDest(a.Dest, s, parseString) }
-func (a *StringArgument) setDefault()        { setDestDefault(a.Dest, a.Default) }
+func (a *StringArgument) GetName() string    { return a.Name }
+func (a *StringArgument) GetHelp() string    { return a.Help }
+func (a *StringArgument) GetEnv() string     { return a.Env }
+func (a *StringArgument) GetRequired() bool  { return a.Required }
+func (a *StringArgument) Validate() error    { return argumentValidate(a) }
+func (a *StringArgument) Set(s string) error { return setDest(a.Dest, s, parseString) }
+func (a *StringArgument) SetDefault()        { setDestDefault(a.Dest, a.Default) }
 
 // --- IntArgument -------------------------------------------------------------
 
@@ -110,10 +111,10 @@ type IntArgument struct {
 	Required bool
 }
 
-func (a *IntArgument) name() string       { return a.Name }
-func (a *IntArgument) help() string       { return a.Help }
-func (a *IntArgument) env() string        { return a.Env }
-func (a *IntArgument) required() bool     { return a.Required }
-func (a *IntArgument) validate() error    { return argumentValidate(a) }
-func (a *IntArgument) set(s string) error { return setDest(a.Dest, s, parseInt) }
-func (a *IntArgument) setDefault()        { setDestDefault(a.Dest, a.Default) }
+func (a *IntArgument) GetName() string    { return a.Name }
+func (a *IntArgument) GetHelp() string    { return a.Help }
+func (a *IntArgument) GetEnv() string     { return a.Env }
+func (a *IntArgument) GetRequired() bool  { return a.Required }
+func (a *IntArgument) Validate() error    { return argumentValidate(a) }
+func (a *IntArgument) Set(s string) error { return setDest(a.Dest, s, parseInt) }
+func (a *IntArgument) SetDefault()        { setDestDefault(a.Dest, a.Default) }

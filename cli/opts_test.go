@@ -19,8 +19,8 @@ func TestOptionFlag(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := (&StringOption{Flag: tt.input}).flag(); got != tt.want {
-				t.Errorf("Option{Flag: %q}.flag() = %q, want %q", tt.input, got, tt.want)
+			if got := (&StringOption{Flag: tt.input}).GetFlag(); got != tt.want {
+				t.Errorf("Option{Flag: %q}.GetFlag() = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
@@ -40,14 +40,14 @@ func TestOptionLong(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			if got := (&StringOption{Long: tt.input}).long(); got != tt.want {
-				t.Errorf("Option{Long: %q}.long() = %q, want %q", tt.input, got, tt.want)
+			if got := (&StringOption{Long: tt.input}).GetLong(); got != tt.want {
+				t.Errorf("Option{Long: %q}.GetLong() = %q, want %q", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-// TestOptionName covers the name() fallback shared by every Option
+// TestOptionName covers the GetName() fallback shared by every Option
 // type: Name, else Long without "--", else Flag without "-".
 func TestOptionName(t *testing.T) {
 	tests := []struct {
@@ -64,8 +64,8 @@ func TestOptionName(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := tt.opt.name(); got != tt.want {
-				t.Errorf("name() = %q, want %q", got, tt.want)
+			if got := tt.opt.GetName(); got != tt.want {
+				t.Errorf("GetName() = %q, want %q", got, tt.want)
 			}
 		})
 	}
@@ -75,35 +75,35 @@ func TestOptionName(t *testing.T) {
 
 // TestIntOption_Accessors covers the IntOption accessors the rest of the
 // suite happens not to reach: Parse/Validate/HelpString already exercise
-// name()/flag()/long() (via the various "-n" test cases), but none of
-// them touch help(), action(), or required() when unset.
+// GetName()/GetFlag()/GetLong() (via the various "-n" test cases), but none of
+// them touch GetHelp(), GetAction(), or GetRequired() when unset.
 func TestIntOption_Accessors(t *testing.T) {
 	o := &IntOption{Name: "count", Flag: "-n", Help: "How many"}
-	if got := o.name(); got != "count" {
-		t.Errorf("name() = %q, want %q", got, "count")
+	if got := o.GetName(); got != "count" {
+		t.Errorf("GetName() = %q, want %q", got, "count")
 	}
-	if got := o.help(); got != "How many" {
-		t.Errorf("help() = %q, want %q", got, "How many")
+	if got := o.GetHelp(); got != "How many" {
+		t.Errorf("GetHelp() = %q, want %q", got, "How many")
 	}
-	if got := o.action(); got != nil {
-		t.Errorf("action() = %v, want nil, unset", got)
+	if got := o.GetAction(); got != nil {
+		t.Errorf("GetAction() = %v, want nil, unset", got)
 	}
-	if got := o.required(); got != false {
-		t.Errorf("required() = %v, want false, unset", got)
+	if got := o.GetRequired(); got != false {
+		t.Errorf("GetRequired() = %v, want false, unset", got)
 	}
-	if got := (&IntOption{Required: true}).required(); got != true {
-		t.Errorf("required() = %v, want true", got)
+	if got := (&IntOption{Required: true}).GetRequired(); got != true {
+		t.Errorf("GetRequired() = %v, want true", got)
 	}
 }
 
-// TestBoolOption_Required covers required(), which Parse's TestParse_Required
+// TestBoolOption_Required covers GetRequired(), which Parse's TestParse_Required
 // only exercises for StringOption and StringArgument.
 func TestBoolOption_Required(t *testing.T) {
-	if got := (&BoolOption{}).required(); got != false {
-		t.Errorf("required() = %v, want false, unset", got)
+	if got := (&BoolOption{}).GetRequired(); got != false {
+		t.Errorf("GetRequired() = %v, want false, unset", got)
 	}
-	if got := (&BoolOption{Required: true}).required(); got != true {
-		t.Errorf("required() = %v, want true", got)
+	if got := (&BoolOption{Required: true}).GetRequired(); got != true {
+		t.Errorf("GetRequired() = %v, want true", got)
 	}
 }
 
@@ -130,9 +130,9 @@ func TestOption_Validate(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := tt.opt.validate()
+			err := tt.opt.Validate()
 			if (err != nil) != tt.wantErr {
-				t.Errorf("validate() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

@@ -26,11 +26,11 @@ func TestSet(t *testing.T) {
 			in   string
 			ok   func() bool
 		}{
-			{"StringArgument", (&StringArgument{Dest: &s1}).set, "x", func() bool { return s1 == "x" }},
-			{"StringOption", (&StringOption{Flag: "-s", Dest: &s2}).set, "y", func() bool { return s2 == "y" }},
-			{"IntArgument", (&IntArgument{Dest: &i1}).set, "42", func() bool { return i1 == 42 }},
-			{"IntOption", (&IntOption{Flag: "-i", Dest: &i2}).set, "-7", func() bool { return i2 == -7 }},
-			{"BoolOption", (&BoolOption{Flag: "-b", Dest: &b}).set, "true", func() bool { return b }},
+			{"StringArgument", (&StringArgument{Dest: &s1}).Set, "x", func() bool { return s1 == "x" }},
+			{"StringOption", (&StringOption{Flag: "-s", Dest: &s2}).Set, "y", func() bool { return s2 == "y" }},
+			{"IntArgument", (&IntArgument{Dest: &i1}).Set, "42", func() bool { return i1 == 42 }},
+			{"IntOption", (&IntOption{Flag: "-i", Dest: &i2}).Set, "-7", func() bool { return i2 == -7 }},
+			{"BoolOption", (&BoolOption{Flag: "-b", Dest: &b}).Set, "true", func() bool { return b }},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -51,9 +51,9 @@ func TestSet(t *testing.T) {
 			set  func(string) error
 			want string
 		}{
-			{"IntArgument", (&IntArgument{Dest: &i}).set, "invalid integer value"},
-			{"IntOption", (&IntOption{Flag: "-i", Dest: &i}).set, "invalid integer value"},
-			{"BoolOption", (&BoolOption{Flag: "-b", Dest: &b}).set, "invalid boolean value"},
+			{"IntArgument", (&IntArgument{Dest: &i}).Set, "invalid integer value"},
+			{"IntOption", (&IntOption{Flag: "-i", Dest: &i}).Set, "invalid integer value"},
+			{"BoolOption", (&BoolOption{Flag: "-b", Dest: &b}).Set, "invalid boolean value"},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -73,11 +73,11 @@ func TestSet(t *testing.T) {
 			name string
 			set  func(string) error
 		}{
-			{"StringArgument", (&StringArgument{}).set},
-			{"StringOption", (&StringOption{Flag: "-s"}).set},
-			{"IntArgument", (&IntArgument{}).set},
-			{"IntOption", (&IntOption{Flag: "-i"}).set},
-			{"BoolOption", (&BoolOption{Flag: "-b"}).set},
+			{"StringArgument", (&StringArgument{}).Set},
+			{"StringOption", (&StringOption{Flag: "-s"}).Set},
+			{"IntArgument", (&IntArgument{}).Set},
+			{"IntOption", (&IntOption{Flag: "-i"}).Set},
+			{"BoolOption", (&BoolOption{Flag: "-b"}).Set},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
@@ -130,12 +130,12 @@ func optionSlicesEqual(a, b []Option) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].name() != b[i].name() ||
-			a[i].flag() != b[i].flag() ||
-			a[i].long() != b[i].long() ||
-			a[i].help() != b[i].help() ||
-			a[i].env() != b[i].env() ||
-			(a[i].action() == nil) != (b[i].action() == nil) {
+		if a[i].GetName() != b[i].GetName() ||
+			a[i].GetFlag() != b[i].GetFlag() ||
+			a[i].GetLong() != b[i].GetLong() ||
+			a[i].GetHelp() != b[i].GetHelp() ||
+			a[i].GetEnv() != b[i].GetEnv() ||
+			(a[i].GetAction() == nil) != (b[i].GetAction() == nil) {
 			return false
 		}
 	}
@@ -428,7 +428,7 @@ func TestOptions_StopsEarly(t *testing.T) {
 		if len(got) != 2 {
 			t.Fatalf("options() = %d options, want 2 (user -h/--help + version built-in)", len(got))
 		}
-		if got[1].flag() != "-v" || got[1].long() != "--version" {
+		if got[1].GetFlag() != "-v" || got[1].GetLong() != "--version" {
 			t.Errorf("second yielded Option = %+v, want the version built-in", got[1])
 		}
 	})
@@ -485,7 +485,7 @@ func TestItems(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
 			for it := range tt.cmd.items(tt.scope) {
-				got = append(got, it.name())
+				got = append(got, it.GetName())
 			}
 			if !slices.Equal(got, tt.want) {
 				t.Errorf("items() = %v, want %v", got, tt.want)
@@ -519,7 +519,7 @@ func TestItems_StopsEarly(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var got []string
 			cmd.items(declaredOnly)(func(it item) bool {
-				got = append(got, it.name())
+				got = append(got, it.GetName())
 				return len(got) < tt.stopAfter
 			})
 			if !slices.Equal(got, tt.want) {
@@ -1425,7 +1425,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		if !ran {
 			t.Fatal("Action did not run")
 		}
-		if seen.flag() != "-x" || seen.long() != "--extra" {
+		if seen.GetFlag() != "-x" || seen.GetLong() != "--extra" {
 			t.Errorf("Action received Option %+v, want Flag=-x Long=--extra", seen)
 		}
 		if seenValue != "something" {
@@ -2363,7 +2363,7 @@ func TestParse_Required(t *testing.T) {
 func TestSetDefault(t *testing.T) {
 	t.Run("assigns Default to Dest", func(t *testing.T) {
 		s1, s2, i1, i2, b := "old", "old", 1, 1, true
-		items := []interface{ setDefault() }{
+		items := []interface{ SetDefault() }{
 			&StringArgument{Dest: &s1, Default: "new"},
 			&StringOption{Flag: "-s", Dest: &s2, Default: "new"},
 			&IntArgument{Dest: &i1, Default: 7},
@@ -2371,7 +2371,7 @@ func TestSetDefault(t *testing.T) {
 			&BoolOption{Flag: "-b", Dest: &b, Default: false},
 		}
 		for _, it := range items {
-			it.setDefault()
+			it.SetDefault()
 		}
 		if s1 != "new" || s2 != "new" || i1 != 7 || i2 != 7 || b {
 			t.Errorf("Dests = %q, %q, %d, %d, %v; want new, new, 7, 7, false", s1, s2, i1, i2, b)
@@ -2379,7 +2379,7 @@ func TestSetDefault(t *testing.T) {
 	})
 
 	t.Run("a nil Dest is a no-op", func(t *testing.T) {
-		items := []interface{ setDefault() }{
+		items := []interface{ SetDefault() }{
 			&StringArgument{Default: "x"},
 			&StringOption{Flag: "-s", Default: "x"},
 			&IntArgument{Default: 1},
@@ -2387,7 +2387,7 @@ func TestSetDefault(t *testing.T) {
 			&BoolOption{Flag: "-b", Default: true},
 		}
 		for _, it := range items {
-			it.setDefault() // a nil Dest must not panic
+			it.SetDefault() // a nil Dest must not panic
 		}
 	})
 }

@@ -14,16 +14,19 @@ import (
 //
 // Option is implemented by a family of typed structs -- StringOption,
 // IntOption, and BoolOption -- each owning its Dest and Default as its
-// own Go type; see Argument's doc comment. The interface itself is
-// unexported-method-only: a concrete type keeps its fields public for
-// struct-literal construction and satisfies Option through small
-// unexported accessor methods, so field and method never collide.
+// own Go type; see Argument's doc comment. The interface's accessors are
+// exported (GetFlag, GetLong, ...) so a value held only as Option (e.g.
+// from Command.Options) can still be read without a type assertion to
+// its concrete struct; each concrete type also keeps its fields public
+// for struct-literal construction. The Get prefix is what keeps field
+// and method from colliding -- a plain Flag() would clash with the Flag
+// field.
 type Option interface {
 	item
-	flag() string
-	long() string
-	action() Action
-	required() bool
+	GetFlag() string
+	GetLong() string
+	GetAction() Action
+	GetRequired() bool
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, whatever
@@ -55,10 +58,10 @@ func optionName(name, flag, long string) string {
 }
 
 // optionValidate is the base behavior behind every Option
-// implementation's validate() method (see argumentValidate): it checks
-// the normalized flag() and long() forms, and never calls o.validate().
+// implementation's Validate() method (see argumentValidate): it checks
+// the normalized GetFlag() and GetLong() forms, and never calls o.Validate().
 func optionValidate(o Option) error {
-	flag, long := o.flag(), o.long()
+	flag, long := o.GetFlag(), o.GetLong()
 
 	// An Option needs at least one of Flag/Long to be reachable from
 	// the command line at all.
@@ -81,7 +84,7 @@ func optionValidate(o Option) error {
 // token as typed, with no conversion.
 type StringOption struct {
 	// Name is an optional identifier, decoupled from Flag/Long. It is
-	// the Option's name(); when unset, that is Long, else Flag, without
+	// the Option's GetName(); when unset, that is Long, else Flag, without
 	// its dashes. Validate requires it to be unique across every
 	// Argument, Option, and EnvVar.
 	Name string
@@ -132,16 +135,16 @@ type StringOption struct {
 	Required bool
 }
 
-func (o *StringOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
-func (o *StringOption) flag() string       { return normalizeDashes(o.Flag, 1) }
-func (o *StringOption) long() string       { return normalizeDashes(o.Long, 2) }
-func (o *StringOption) help() string       { return o.Help }
-func (o *StringOption) env() string        { return o.Env }
-func (o *StringOption) action() Action     { return o.Action }
-func (o *StringOption) required() bool     { return o.Required }
-func (o *StringOption) validate() error    { return optionValidate(o) }
-func (o *StringOption) set(s string) error { return setDest(o.Dest, s, parseString) }
-func (o *StringOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
+func (o *StringOption) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
+func (o *StringOption) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *StringOption) GetLong() string    { return normalizeDashes(o.Long, 2) }
+func (o *StringOption) GetHelp() string    { return o.Help }
+func (o *StringOption) GetEnv() string     { return o.Env }
+func (o *StringOption) GetAction() Action  { return o.Action }
+func (o *StringOption) GetRequired() bool  { return o.Required }
+func (o *StringOption) Validate() error    { return optionValidate(o) }
+func (o *StringOption) Set(s string) error { return setDest(o.Dest, s, parseString) }
+func (o *StringOption) SetDefault()        { setDestDefault(o.Dest, o.Default) }
 
 // --- IntOption ---------------------------------------------------------------
 
@@ -181,16 +184,16 @@ type IntOption struct {
 	Required bool
 }
 
-func (o *IntOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
-func (o *IntOption) flag() string       { return normalizeDashes(o.Flag, 1) }
-func (o *IntOption) long() string       { return normalizeDashes(o.Long, 2) }
-func (o *IntOption) help() string       { return o.Help }
-func (o *IntOption) env() string        { return o.Env }
-func (o *IntOption) action() Action     { return o.Action }
-func (o *IntOption) required() bool     { return o.Required }
-func (o *IntOption) validate() error    { return optionValidate(o) }
-func (o *IntOption) set(s string) error { return setDest(o.Dest, s, parseInt) }
-func (o *IntOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
+func (o *IntOption) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
+func (o *IntOption) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *IntOption) GetLong() string    { return normalizeDashes(o.Long, 2) }
+func (o *IntOption) GetHelp() string    { return o.Help }
+func (o *IntOption) GetEnv() string     { return o.Env }
+func (o *IntOption) GetAction() Action  { return o.Action }
+func (o *IntOption) GetRequired() bool  { return o.Required }
+func (o *IntOption) Validate() error    { return optionValidate(o) }
+func (o *IntOption) Set(s string) error { return setDest(o.Dest, s, parseInt) }
+func (o *IntOption) SetDefault()        { setDestDefault(o.Dest, o.Default) }
 
 // --- BoolOption --------------------------------------------------------------
 
@@ -228,26 +231,26 @@ type BoolOption struct {
 	Required bool
 }
 
-func (o *BoolOption) name() string       { return optionName(o.Name, o.flag(), o.long()) }
-func (o *BoolOption) flag() string       { return normalizeDashes(o.Flag, 1) }
-func (o *BoolOption) long() string       { return normalizeDashes(o.Long, 2) }
-func (o *BoolOption) help() string       { return o.Help }
-func (o *BoolOption) env() string        { return o.Env }
-func (o *BoolOption) action() Action     { return o.Action }
-func (o *BoolOption) required() bool     { return o.Required }
-func (o *BoolOption) validate() error    { return optionValidate(o) }
-func (o *BoolOption) set(s string) error { return setDest(o.Dest, s, parseBool) }
-func (o *BoolOption) setDefault()        { setDestDefault(o.Dest, o.Default) }
+func (o *BoolOption) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
+func (o *BoolOption) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
+func (o *BoolOption) GetLong() string    { return normalizeDashes(o.Long, 2) }
+func (o *BoolOption) GetHelp() string    { return o.Help }
+func (o *BoolOption) GetEnv() string     { return o.Env }
+func (o *BoolOption) GetAction() Action  { return o.Action }
+func (o *BoolOption) GetRequired() bool  { return o.Required }
+func (o *BoolOption) Validate() error    { return optionValidate(o) }
+func (o *BoolOption) Set(s string) error { return setDest(o.Dest, s, parseBool) }
+func (o *BoolOption) SetDefault()        { setDestDefault(o.Dest, o.Default) }
 
 // --- Action ------------------------------------------------------------------
 
 // Action is a hook that runs when its Option's flag is seen on the
-// command line. Parse calls it as opt.action()(c, opt, value): c is
+// command line. Parse calls it as opt.GetAction()(c, opt, value): c is
 // the Command being parsed (so an Action can call c.PrintHelp,
 // c.PrintVersion, or c.PrintErrorf, as Parse itself does), opt is the
 // matched Option (assert it to its concrete type, e.g.
 // opt.(*StringOption).Flag, to read its declared fields), and value is
-// the string Parse hands to the Option's set method: the token consumed
+// the string Parse hands to the Option's Set method: the token consumed
 // from the command line, or "true" for a *BoolOption, which never
 // consumes one. Any other Option, including an Action-only one with no
 // Dest, consumes a value by default -- it is the type, not the Dest,

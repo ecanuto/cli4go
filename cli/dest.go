@@ -6,7 +6,7 @@ import (
 )
 
 // parseString, parseInt and parseBool are the string -> Go value
-// conversions behind the typed Argument/Option/EnvVar family's set
+// conversions behind the typed Argument/Option/EnvVar family's Set
 // methods (see setDest), so the error messages live in one place.
 func parseString(s string) (string, error) { return s, nil }
 
@@ -28,7 +28,7 @@ func parseBool(s string) (bool, error) {
 
 // setDest converts s with parse and stores the result in dest, doing
 // nothing -- and returning nil -- when dest is unset. It is the base
-// behavior behind every typed item's set method: only parse differs
+// behavior behind every typed item's Set method: only parse differs
 // from one type to the next. On a conversion error dest is left alone.
 func setDest[T any](dest *T, s string, parse func(string) (T, error)) error {
 	if dest == nil {
@@ -43,7 +43,7 @@ func setDest[T any](dest *T, s string, parse func(string) (T, error)) error {
 }
 
 // setDestDefault stores def in dest, when dest is set. It is the base
-// behavior behind every typed item's setDefault method: def and dest
+// behavior behind every typed item's SetDefault method: def and dest
 // are the same Go type, so it can never fail.
 func setDestDefault[T any](dest *T, def T) {
 	if dest != nil {

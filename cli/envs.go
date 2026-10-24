@@ -21,11 +21,11 @@ type EnvVar interface {
 }
 
 // envVarValidate is the base behavior behind every EnvVar
-// implementation's validate() method (see argumentValidate): every
+// implementation's Validate() method (see argumentValidate): every
 // EnvVar needs a name, since the name is the environment variable
-// itself. It never calls e.validate().
+// itself. It never calls e.Validate().
 func envVarValidate(e EnvVar) error {
-	if e.name() == "" {
+	if e.GetName() == "" {
 		return errors.New("cli: EnvVar.Name must not be empty")
 	}
 	return nil
@@ -56,9 +56,9 @@ type StringEnvVar struct {
 	Default string
 }
 
-func (e *StringEnvVar) name() string       { return e.Name }
-func (e *StringEnvVar) help() string       { return e.Help }
-func (e *StringEnvVar) env() string        { return e.Name }
-func (e *StringEnvVar) validate() error    { return envVarValidate(e) }
-func (e *StringEnvVar) set(s string) error { return setDest(e.Dest, s, parseString) }
-func (e *StringEnvVar) setDefault()        { setDestDefault(e.Dest, e.Default) }
+func (e *StringEnvVar) GetName() string    { return e.Name }
+func (e *StringEnvVar) GetHelp() string    { return e.Help }
+func (e *StringEnvVar) GetEnv() string     { return e.Name }
+func (e *StringEnvVar) Validate() error    { return envVarValidate(e) }
+func (e *StringEnvVar) Set(s string) error { return setDest(e.Dest, s, parseString) }
+func (e *StringEnvVar) SetDefault()        { setDestDefault(e.Dest, e.Default) }
