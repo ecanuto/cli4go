@@ -17,7 +17,33 @@ import (
 // type owns its Dest and Default as its own Go type, so there is
 // nothing to type-check at runtime. See Argument's doc comment.
 type EnvVar interface {
-	item
+	// GetName returns the name of the environment variable itself.
+	GetName() string
+
+	// GetHelp returns the description shown in the help output.
+	GetHelp() string
+
+	// GetEnv returns the name of the environment variable, which is the
+	// same as GetName.
+	GetEnv() string
+
+	// Validate reports a structural problem with this EnvVar on its own,
+	// independent of any other item -- an empty Name, for instance.
+	// Cross-item rules (unique names and environment variable names) stay
+	// in Command.Validate.
+	Validate() error
+
+	// Set parses s into Dest, the value of the environment variable. It
+	// returns whatever conversion error the concrete type produces (none
+	// for a string), and does nothing -- returning nil -- when Dest is
+	// unset.
+	Set(s string) error
+
+	// SetDefault assigns Default to Dest directly, when Dest is set, for
+	// when the environment variable is not set. It can never fail, since
+	// Default and Dest are the same Go type. The zero value applies too,
+	// like any other Default.
+	SetDefault()
 }
 
 // envVarValidate is the base behavior behind every EnvVar

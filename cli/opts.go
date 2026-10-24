@@ -22,11 +22,49 @@ import (
 // and method from colliding -- a plain Flag() would clash with the Flag
 // field.
 type Option interface {
-	item
+	// GetName returns the identifier of this Option: its Name when set,
+	// else its long form, else its flag form, without dashes.
+	GetName() string
+
+	// GetFlag returns the short form with exactly one leading dash (e.g.
+	// "-f"), or "" if the Option has none.
 	GetFlag() string
+
+	// GetLong returns the long form with exactly two leading dashes (e.g.
+	// "--foo"), or "" if the Option has none.
 	GetLong() string
+
+	// GetHelp returns the description shown in the help output.
+	GetHelp() string
+
+	// GetEnv returns the name of the environment variable this Option
+	// falls back to when the command line does not set it, or "" if none.
+	GetEnv() string
+
+	// GetAction returns the hook that runs when this Option is seen on
+	// the command line, or nil if none (see Action).
 	GetAction() Action
+
+	// GetRequired reports whether Parse fails with a usage error when
+	// neither the command line nor GetEnv's variable sets this Option.
 	GetRequired() bool
+
+	// Validate reports a structural problem with this Option on its own,
+	// independent of any other item -- a missing Flag/Long, for instance.
+	// Cross-item rules (unique names, forms, and environment variable
+	// names) stay in Command.Validate.
+	Validate() error
+
+	// Set parses s into Dest, the token Parse (or an Env lookup) just
+	// resolved for this Option. It returns whatever conversion error the
+	// concrete type produces, and does nothing -- returning nil -- when
+	// Dest is unset.
+	Set(s string) error
+
+	// SetDefault assigns Default to Dest directly, when Dest is set -- no
+	// string round trip, and it can never fail, since Default and Dest are
+	// the same Go type. The zero value applies too, like any other Default.
+	SetDefault()
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, whatever

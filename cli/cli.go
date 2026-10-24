@@ -20,31 +20,16 @@ import (
 // alike through this interface (see items); what sets each family apart
 // (positional order, Flag/Long, Action) lives on Argument and Option
 // themselves.
+//
+// item is not part of the public API: Argument, Option, and EnvVar each
+// declare these methods and document their contracts, and each satisfies
+// item structurally, so the compiler keeps the declarations in sync.
 type item interface {
 	GetName() string
 	GetHelp() string
-
-	// GetEnv returns the name of the environment variable this item falls
-	// back to when the command line does not set it, or "" if none. An
-	// EnvVar's GetEnv is its own name.
 	GetEnv() string
-
-	// Validate reports a structural problem with this item on its own,
-	// independent of any other item -- an empty Name, a missing
-	// Flag/Long, ... Cross-item rules (unique names, flags, and
-	// environment variable names) stay in the Command-level checks.
 	Validate() error
-
-	// Set parses s into Dest, the token Parse (or an Env lookup) just
-	// resolved for this item. It returns whatever conversion error the
-	// concrete type produces (none for a string), and does nothing --
-	// returning nil -- when Dest is unset.
 	Set(s string) error
-
-	// SetDefault assigns Default to Dest directly, when Dest is set --
-	// no string round trip, and it can never fail, since Default and
-	// Dest are the same Go type. The zero value applies too, like any
-	// other Default (see StringArgument's Default doc comment).
 	SetDefault()
 }
 

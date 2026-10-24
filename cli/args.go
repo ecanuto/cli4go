@@ -25,8 +25,38 @@ import (
 // elsewhere in this package, is what keeps field and method from
 // colliding -- a plain Name() would clash with the Name field.
 type Argument interface {
-	item
+	// GetName returns the display name shown in the usage line and in the
+	// "Arguments:" help section.
+	GetName() string
+
+	// GetHelp returns the description shown in the help output.
+	GetHelp() string
+
+	// GetEnv returns the name of the environment variable this Argument
+	// falls back to when the command line does not set it, or "" if none.
+	GetEnv() string
+
+	// GetRequired reports whether Parse fails with a usage error when
+	// neither the command line nor GetEnv's variable sets this Argument.
 	GetRequired() bool
+
+	// Validate reports a structural problem with this Argument on its own,
+	// independent of any other item -- an empty Name, for instance.
+	// Cross-item rules (unique names and environment variable names) stay
+	// in Command.Validate.
+	Validate() error
+
+	// Set parses s into Dest, the token Parse (or an Env lookup) just
+	// resolved for this Argument. It returns whatever conversion error the
+	// concrete type produces (none for a string), and does nothing --
+	// returning nil -- when Dest is unset.
+	Set(s string) error
+
+	// SetDefault assigns Default to Dest directly, when Dest is set -- no
+	// string round trip, and it can never fail, since Default and Dest are
+	// the same Go type. The zero value applies too, like any other Default
+	// (see StringArgument's Default doc comment).
+	SetDefault()
 }
 
 // argumentValidate is the base behavior behind every Argument
