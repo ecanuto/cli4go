@@ -4,16 +4,16 @@ import (
 	"testing"
 )
 
-func TestParseString(t *testing.T) {
+func TestStringParser(t *testing.T) {
 	for _, in := range []string{"", "hello", "--not-a-flag"} {
-		got, err := parseString(in)
+		got, err := stringParser{}.Parse(in)
 		if err != nil || got != in {
-			t.Errorf("parseString(%q) = %q, %v; want %q, nil", in, got, err, in)
+			t.Errorf("stringParser.Parse(%q) = %q, %v; want %q, nil", in, got, err, in)
 		}
 	}
 }
 
-func TestParseInt(t *testing.T) {
+func TestIntParser(t *testing.T) {
 	tests := []struct {
 		input   string
 		want    int
@@ -28,18 +28,18 @@ func TestParseInt(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got, err := parseInt(tt.input)
+			got, err := intParser{}.Parse(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("parseInt(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				t.Fatalf("intParser.Parse(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 			}
 			if !tt.wantErr && got != tt.want {
-				t.Errorf("parseInt(%q) = %d, want %d", tt.input, got, tt.want)
+				t.Errorf("intParser.Parse(%q) = %d, want %d", tt.input, got, tt.want)
 			}
 		})
 	}
 }
 
-func TestParseBool(t *testing.T) {
+func TestBoolParser(t *testing.T) {
 	tests := []struct {
 		input   string
 		want    bool
@@ -55,12 +55,12 @@ func TestParseBool(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got, err := parseBool(tt.input)
+			got, err := boolParser{}.Parse(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("parseBool(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+				t.Fatalf("boolParser.Parse(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
 			}
 			if !tt.wantErr && got != tt.want {
-				t.Errorf("parseBool(%q) = %v, want %v", tt.input, got, tt.want)
+				t.Errorf("boolParser.Parse(%q) = %v, want %v", tt.input, got, tt.want)
 			}
 		})
 	}

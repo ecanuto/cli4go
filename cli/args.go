@@ -10,12 +10,12 @@ import (
 // Command.Arguments determines the order in which it is expected on the
 // command line.
 //
-// Argument is implemented by a family of typed structs -- StringArgument
-// and IntArgument -- rather than by one struct carrying a Dest/Default
-// pair whose concrete type has to be inferred at runtime. Each concrete
-// type owns its Dest and Default as its own Go type (e.g. *string/string,
-// *int/int), so there is nothing to type-switch on, and the compiler
-// keeps Default in sync with Dest for free.
+// Argument is implemented by the generic ArgumentOf, through the aliases
+// StringArgument and IntArgument, rather than by one struct carrying a
+// Dest/Default pair whose concrete type has to be inferred at runtime.
+// Each instantiation owns its Dest and Default as its own Go type (e.g.
+// *string/string, *int/int), so there is nothing to type-switch on, and
+// the compiler keeps Default in sync with Dest for free.
 //
 // The interface's accessors are exported (GetName, GetHelp, ...) so a
 // value held only as Argument (e.g. from Command.Arguments) can still be
@@ -59,41 +59,30 @@ type Argument interface {
 	SetDefault()
 }
 
-// argumentValidate is the base behavior behind every Argument
-// implementation's Validate() method (the closest thing Go has to a
-// parent-class call: a concrete type's Validate() calls it first, then
-// adds any rule of its own): every Argument needs a display name, which
-// shows in the usage line and the "Arguments:" help section. It never
-// calls a.Validate().
-func argumentValidate(a Argument) error {
-	if a.GetName() == "" {
-		return errors.New("cli: Argument.Name must not be empty")
-	}
-	return nil
-}
+// --- ArgumentOf --------------------------------------------------------------
 
-// --- StringArgument ----------------------------------------------------------
-
-// StringArgument describes a single string-typed positional argument --
-// the Argument implementation for the common case of an argument whose
-// value is just the token as typed, with no conversion.
-type StringArgument struct {
+// ArgumentOf describes a single positional argument whose value is a T,
+// read from the command line by the Parser P. Use it through the aliases
+// for the common types, StringArgument and IntArgument; an external
+// package gets the same shape for its own type by declaring a Parser and
+// an alias of its own.
+type ArgumentOf[T any, P Parser[T]] struct {
 	// Name is the argument's display name, used in generated usage text
-	// (e.g. "qux" in "Usage: myprogram [qux]").
+	// (e.g. "qux" in "Usage: myprogram qux").
 	Name string
 
 	// Help explains what the argument is for. Shown in the generated
 	// "Arguments:" help section.
 	Help string
 
-	// Dest binds the parsed value directly to a string variable, e.g.
+	// Dest binds the parsed value directly to a variable, e.g.
 	// &cfg.Qux. Optional.
-	Dest *string
+	Dest *T
 
 	// Default is assigned to Dest when neither the command line nor Env
-	// sets it. Its zero value ("") applies just like any other value --
-	// there is no separate "unset" state.
-	Default string
+	// sets it. Its zero value applies just like any other value -- there
+	// is no separate "unset" state.
+	Default T
 
 	// Env, if set, is the environment variable consulted when this
 	// argument is not provided on the command line.
@@ -106,45 +95,30 @@ type StringArgument struct {
 	Required bool
 }
 
-func (a *StringArgument) GetName() string    { return a.Name }
-func (a *StringArgument) GetHelp() string    { return a.Help }
-func (a *StringArgument) GetEnv() string     { return a.Env }
-func (a *StringArgument) GetRequired() bool  { return a.Required }
-func (a *StringArgument) Validate() error    { return argumentValidate(a) }
-func (a *StringArgument) Set(s string) error { return setDest(a.Dest, s, parseString) }
-func (a *StringArgument) SetDefault()        { setDestDefault(a.Dest, a.Default) }
-
-// --- IntArgument -------------------------------------------------------------
-
-// IntArgument describes a single int-typed positional argument -- the
-// Argument implementation for a value that must parse as a Go int
-// (strconv.Atoi). Same fields and shape as StringArgument; see its doc
-// comment for Dest/Default's ergonomics and semantics.
-type IntArgument struct {
-	// Name -- see StringArgument.Name.
-	Name string
-
-	// Help -- see StringArgument.Help.
-	Help string
-
-	// Dest binds the parsed value directly to an int variable, e.g.
-	// &cfg.Count. Optional.
-	Dest *int
-
-	// Default -- see StringArgument.Default.
-	Default int
-
-	// Env -- see StringArgument.Env.
-	Env string
-
-	// Required -- see StringArgument.Required.
-	Required bool
+func (a *ArgumentOf[T, P]) GetName() string   { return a.Name }
+func (a *ArgumentOf[T, P]) GetHelp() string   { return a.Help }
+func (a *ArgumentOf[T, P]) GetEnv() string    { return a.Env }
+func (a *ArgumentOf[T, P]) GetRequired() bool { return a.Required }
+func (a *ArgumentOf[T, P]) Set(s string) error {
+	var p P
+	return setDest(a.Dest, s, p.Parse)
 }
 
-func (a *IntArgument) GetName() string    { return a.Name }
-func (a *IntArgument) GetHelp() string    { return a.Help }
-func (a *IntArgument) GetEnv() string     { return a.Env }
-func (a *IntArgument) GetRequired() bool  { return a.Required }
-func (a *IntArgument) Validate() error    { return argumentValidate(a) }
-func (a *IntArgument) Set(s string) error { return setDest(a.Dest, s, parseInt) }
-func (a *IntArgument) SetDefault()        { setDestDefault(a.Dest, a.Default) }
+func (a *ArgumentOf[T, P]) SetDefault() { setDestDefault(a.Dest, a.Default) }
+
+// Validate requires a display name, which shows in the usage line and
+// the "Arguments:" help section.
+func (a *ArgumentOf[T, P]) Validate() error {
+	if a.Name == "" {
+		return errors.New("cli: Argument.Name must not be empty")
+	}
+	return nil
+}
+
+// StringArgument is a positional argument whose value is the token as
+// typed, with no conversion.
+type StringArgument = ArgumentOf[string, stringParser]
+
+// IntArgument is a positional argument whose value must parse as a Go
+// int (strconv.Atoi).
+type IntArgument = ArgumentOf[int, intParser]

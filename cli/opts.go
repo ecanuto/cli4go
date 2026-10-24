@@ -12,13 +12,13 @@ import (
 // order of Options in Command.Options has no effect on parsing: flags can
 // appear in any order on the command line.
 //
-// Option is implemented by a family of typed structs -- StringOption,
-// IntOption, and BoolOption -- each owning its Dest and Default as its
-// own Go type; see Argument's doc comment. The interface's accessors are
-// exported (GetFlag, GetLong, ...) so a value held only as Option (e.g.
-// from Command.Options) can still be read without a type assertion to
-// its concrete struct; each concrete type also keeps its fields public
-// for struct-literal construction. The Get prefix is what keeps field
+// Option is implemented by the generic OptionOf, through the aliases
+// StringOption, IntOption, and BoolOption, each instantiation owning its
+// Dest and Default as its own Go type; see Argument's doc comment. The
+// interface's accessors are exported (GetFlag, GetLong, ...) so a value
+// held only as Option (e.g. from Command.Options) can still be read
+// without a type assertion to its concrete struct; each concrete type
+// also keeps its fields public for struct-literal construction. The Get prefix is what keeps field
 // and method from colliding -- a plain Flag() would clash with the Flag
 // field.
 type Option interface {
@@ -81,9 +81,8 @@ func normalizeDashes(s string, dashes int) string {
 
 // optionName returns the identifier of an Option: name when set,
 // otherwise long without its "--", otherwise flag without its "-". flag
-// and long are expected normalized (see normalizeDashes); optionValidate
-// guarantees one of them is set, so a validated Option's name is never
-// empty.
+// and long are expected normalized (see normalizeDashes); Validate guarantees
+// one of them is set, so a validated Option's name is never empty.
 func optionName(name, flag, long string) string {
 	switch {
 	case name != "":
@@ -95,32 +94,13 @@ func optionName(name, flag, long string) string {
 	}
 }
 
-// optionValidate is the base behavior behind every Option
-// implementation's Validate() method (see argumentValidate): it checks
-// the normalized GetFlag() and GetLong() forms, and never calls o.Validate().
-func optionValidate(o Option) error {
-	flag, long := o.GetFlag(), o.GetLong()
+// --- OptionOf ----------------------------------------------------------------
 
-	// An Option needs at least one of Flag/Long to be reachable from
-	// the command line at all.
-	if flag == "" && long == "" {
-		return errors.New("cli: Option must set Flag and/or Long")
-	}
-
-	// The short form's fixed length ("-x") is what lets help output use
-	// a constant-width Flag column instead of computing one per Command.
-	if flag != "" && len(flag) != 2 {
-		return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
-	}
-	return nil
-}
-
-// --- StringOption ------------------------------------------------------------
-
-// StringOption describes a single string-typed flag -- the Option
-// implementation for the common case of a flag whose value is just the
-// token as typed, with no conversion.
-type StringOption struct {
+// OptionOf describes a single flag whose value is a T, read by the
+// Parser P. Use it through the aliases for the common types,
+// StringOption, IntOption, and BoolOption; see ArgumentOf for adding one
+// of your own.
+type OptionOf[T any, P Parser[T]] struct {
 	// Name is an optional identifier, decoupled from Flag/Long. It is
 	// the Option's GetName(); when unset, that is Long, else Flag, without
 	// its dashes. Validate requires it to be unique across every
@@ -147,15 +127,15 @@ type StringOption struct {
 	// "Options:" help section.
 	Help string
 
-	// Dest binds the parsed value directly to a string variable, e.g.
+	// Dest binds the parsed value directly to a variable, e.g.
 	// &cfg.Bar. Optional. May be combined with Action -- see the Action
 	// doc comment for the exact resolution order.
-	Dest *string
+	Dest *T
 
 	// Default is assigned to Dest when neither the command line nor Env
-	// sets it. Its zero value ("") applies just like any other value --
-	// there is no separate "unset" state.
-	Default string
+	// sets it. Its zero value applies just like any other value -- there
+	// is no separate "unset" state.
+	Default T
 
 	// Env, if set, is the environment variable consulted when this
 	// option is not provided on the command line.
@@ -173,112 +153,50 @@ type StringOption struct {
 	Required bool
 }
 
-func (o *StringOption) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
-func (o *StringOption) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *StringOption) GetLong() string    { return normalizeDashes(o.Long, 2) }
-func (o *StringOption) GetHelp() string    { return o.Help }
-func (o *StringOption) GetEnv() string     { return o.Env }
-func (o *StringOption) GetAction() Action  { return o.Action }
-func (o *StringOption) GetRequired() bool  { return o.Required }
-func (o *StringOption) Validate() error    { return optionValidate(o) }
-func (o *StringOption) Set(s string) error { return setDest(o.Dest, s, parseString) }
-func (o *StringOption) SetDefault()        { setDestDefault(o.Dest, o.Default) }
-
-// --- IntOption ---------------------------------------------------------------
-
-// IntOption describes a single flag whose value must parse as a Go int
-// (strconv.Atoi) -- the Option implementation for the common case of an
-// integer-valued flag, e.g. "-n 7". Same fields and shape as
-// StringOption; see its doc comment for Dest/Default's ergonomics and
-// semantics, and Flag/Long's for how a built-in's forms are affected.
-type IntOption struct {
-	// Name -- see StringOption.Name.
-	Name string
-
-	// Flag -- see StringOption.Flag.
-	Flag string
-
-	// Long -- see StringOption.Long.
-	Long string
-
-	// Help -- see StringOption.Help.
-	Help string
-
-	// Dest binds the parsed value directly to an int variable, e.g.
-	// &cfg.Count. Optional. May be combined with Action -- see the
-	// Action doc comment for the exact resolution order.
-	Dest *int
-
-	// Default -- see StringOption.Default.
-	Default int
-
-	// Env -- see StringOption.Env.
-	Env string
-
-	// Action -- see StringOption.Action.
-	Action Action
-
-	// Required -- see StringOption.Required.
-	Required bool
+func (o *OptionOf[T, P]) GetName() string   { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
+func (o *OptionOf[T, P]) GetFlag() string   { return normalizeDashes(o.Flag, 1) }
+func (o *OptionOf[T, P]) GetLong() string   { return normalizeDashes(o.Long, 2) }
+func (o *OptionOf[T, P]) GetHelp() string   { return o.Help }
+func (o *OptionOf[T, P]) GetEnv() string    { return o.Env }
+func (o *OptionOf[T, P]) GetAction() Action { return o.Action }
+func (o *OptionOf[T, P]) GetRequired() bool { return o.Required }
+func (o *OptionOf[T, P]) Set(s string) error {
+	var p P
+	return setDest(o.Dest, s, p.Parse)
 }
 
-func (o *IntOption) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
-func (o *IntOption) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *IntOption) GetLong() string    { return normalizeDashes(o.Long, 2) }
-func (o *IntOption) GetHelp() string    { return o.Help }
-func (o *IntOption) GetEnv() string     { return o.Env }
-func (o *IntOption) GetAction() Action  { return o.Action }
-func (o *IntOption) GetRequired() bool  { return o.Required }
-func (o *IntOption) Validate() error    { return optionValidate(o) }
-func (o *IntOption) Set(s string) error { return setDest(o.Dest, s, parseInt) }
-func (o *IntOption) SetDefault()        { setDestDefault(o.Dest, o.Default) }
+func (o *OptionOf[T, P]) SetDefault() { setDestDefault(o.Dest, o.Default) }
 
-// --- BoolOption --------------------------------------------------------------
+// Validate checks the normalized flag and long forms.
+func (o *OptionOf[T, P]) Validate() error {
+	flag, long := o.GetFlag(), o.GetLong()
 
-// BoolOption describes a single boolean flag -- one whose mere presence
-// on the command line sets it, never consuming a following token (see
-// the Action doc comment). It carries the same fields StringOption does;
-// the type itself is what says "this flag is boolean".
-type BoolOption struct {
-	// Name -- see StringOption.Name.
-	Name string
+	// An Option needs at least one of Flag/Long to be reachable from
+	// the command line at all.
+	if flag == "" && long == "" {
+		return errors.New("cli: Option must set Flag and/or Long")
+	}
 
-	// Flag -- see StringOption.Flag.
-	Flag string
-
-	// Long -- see StringOption.Long.
-	Long string
-
-	// Help -- see StringOption.Help.
-	Help string
-
-	// Dest binds the parsed value directly to a bool variable, e.g.
-	// &cfg.Foo. Optional.
-	Dest *bool
-
-	// Default -- see StringOption.Default.
-	Default bool
-
-	// Env -- see StringOption.Env.
-	Env string
-
-	// Action -- see StringOption.Action.
-	Action Action
-
-	// Required -- see StringOption.Required.
-	Required bool
+	// The short form's fixed length ("-x") is what lets help output use
+	// a constant-width Flag column instead of computing one per Command.
+	if flag != "" && len(flag) != 2 {
+		return fmt.Errorf("cli: Option.Flag %q must be a dash followed by exactly one character", flag)
+	}
+	return nil
 }
 
-func (o *BoolOption) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
-func (o *BoolOption) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *BoolOption) GetLong() string    { return normalizeDashes(o.Long, 2) }
-func (o *BoolOption) GetHelp() string    { return o.Help }
-func (o *BoolOption) GetEnv() string     { return o.Env }
-func (o *BoolOption) GetAction() Action  { return o.Action }
-func (o *BoolOption) GetRequired() bool  { return o.Required }
-func (o *BoolOption) Validate() error    { return optionValidate(o) }
-func (o *BoolOption) Set(s string) error { return setDest(o.Dest, s, parseBool) }
-func (o *BoolOption) SetDefault()        { setDestDefault(o.Dest, o.Default) }
+// StringOption is a flag whose value is the token as typed, with no
+// conversion.
+type StringOption = OptionOf[string, stringParser]
+
+// IntOption is a flag whose value must parse as a Go int
+// (strconv.Atoi), e.g. "-n 7".
+type IntOption = OptionOf[int, intParser]
+
+// BoolOption is a boolean flag -- one whose mere presence on the command
+// line sets it, never consuming a following token (see the Action doc
+// comment). The type itself is what says "this flag is boolean".
+type BoolOption = OptionOf[bool, boolParser]
 
 // --- Action ------------------------------------------------------------------
 

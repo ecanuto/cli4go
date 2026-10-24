@@ -12,10 +12,11 @@ import (
 // command-line token -- so its value precedence is just Env, then
 // Default, with no flag position to override it.
 //
-// EnvVar is implemented by typed structs (StringEnvVar) with the same
-// shape as Argument and Option, and for the same reason: each concrete
-// type owns its Dest and Default as its own Go type, so there is
-// nothing to type-check at runtime. See Argument's doc comment.
+// EnvVar is implemented by the generic EnvVarOf (through the alias
+// StringEnvVar) with the same shape as Argument and Option, and for the
+// same reason: each instantiation owns its Dest and Default as its own
+// Go type, so there is nothing to type-check at runtime. See Argument's
+// doc comment.
 type EnvVar interface {
 	// GetName returns the name of the environment variable itself.
 	GetName() string
@@ -50,23 +51,12 @@ type EnvVar interface {
 	SetDefault()
 }
 
-// envVarValidate is the base behavior behind every EnvVar
-// implementation's Validate() method (see argumentValidate): every
-// EnvVar needs a name, since the name is the environment variable
-// itself. It never calls e.Validate().
-func envVarValidate(e EnvVar) error {
-	if e.GetName() == "" {
-		return errors.New("cli: EnvVar.Name must not be empty")
-	}
-	return nil
-}
+// --- EnvVarOf ----------------------------------------------------------------
 
-// --- StringEnvVar ------------------------------------------------------------
-
-// StringEnvVar describes a standalone string-typed environment
-// variable -- the EnvVar implementation for the common case of a
-// variable whose value is used as-is, with no conversion.
-type StringEnvVar struct {
+// EnvVarOf describes a standalone environment variable whose value is a
+// T, read by the Parser P. Use it through the alias for the common type,
+// StringEnvVar; see ArgumentOf for adding one of your own.
+type EnvVarOf[T any, P Parser[T]] struct {
 	// Name is the environment variable name.
 	Name string
 
@@ -74,16 +64,16 @@ type StringEnvVar struct {
 	// generated "Environment Variables:" help section.
 	Help string
 
-	// Dest binds the resolved value directly to a string variable, e.g.
-	// &cfg.Debug. Optional -- a StringEnvVar with no Dest is purely
+	// Dest binds the resolved value directly to a variable, e.g.
+	// &cfg.Debug. Optional -- an EnvVarOf with no Dest is purely
 	// informational, shown in help but not resolved into anything (the
 	// consuming application reads it itself, e.g. via os.Getenv).
-	Dest *string
+	Dest *T
 
 	// Default is assigned to Dest when the environment variable is not
-	// set. Its zero value ("") applies just like any other value -- see
-	// StringArgument.Default.
-	Default string
+	// set. Its zero value applies just like any other value -- see
+	// ArgumentOf.Default.
+	Default T
 
 	// Required makes Parse fail with a usage error (ExitCode() == 2)
 	// when the environment variable is not set. Not meant to be combined
@@ -92,10 +82,26 @@ type StringEnvVar struct {
 	Required bool
 }
 
-func (e *StringEnvVar) GetName() string    { return e.Name }
-func (e *StringEnvVar) GetHelp() string    { return e.Help }
-func (e *StringEnvVar) GetEnv() string     { return e.Name }
-func (e *StringEnvVar) GetRequired() bool  { return e.Required }
-func (e *StringEnvVar) Validate() error    { return envVarValidate(e) }
-func (e *StringEnvVar) Set(s string) error { return setDest(e.Dest, s, parseString) }
-func (e *StringEnvVar) SetDefault()        { setDestDefault(e.Dest, e.Default) }
+func (e *EnvVarOf[T, P]) GetName() string   { return e.Name }
+func (e *EnvVarOf[T, P]) GetHelp() string   { return e.Help }
+func (e *EnvVarOf[T, P]) GetEnv() string    { return e.Name }
+func (e *EnvVarOf[T, P]) GetRequired() bool { return e.Required }
+func (e *EnvVarOf[T, P]) Set(s string) error {
+	var p P
+	return setDest(e.Dest, s, p.Parse)
+}
+
+func (e *EnvVarOf[T, P]) SetDefault() { setDestDefault(e.Dest, e.Default) }
+
+// Validate requires a name, since the name is the environment variable
+// itself.
+func (e *EnvVarOf[T, P]) Validate() error {
+	if e.Name == "" {
+		return errors.New("cli: EnvVar.Name must not be empty")
+	}
+	return nil
+}
+
+// StringEnvVar is a standalone environment variable whose value is used
+// as-is, with no conversion.
+type StringEnvVar = EnvVarOf[string, stringParser]
