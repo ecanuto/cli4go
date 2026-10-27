@@ -36,6 +36,10 @@ type Argument interface {
 	// falls back to when the command line does not set it, or "" if none.
 	GetEnv() string
 
+	// GetDefault returns Default as a plain value (a string, an int, ...),
+	// which is the zero value of its type when none was declared.
+	GetDefault() any
+
 	// GetRequired reports whether Parse fails with a usage error when
 	// neither the command line nor GetEnv's variable sets this Argument.
 	GetRequired() bool
@@ -98,6 +102,7 @@ type ArgumentOf[T any, P Parser[T]] struct {
 func (a *ArgumentOf[T, P]) GetName() string    { return a.Name }
 func (a *ArgumentOf[T, P]) GetHelp() string    { return a.Help }
 func (a *ArgumentOf[T, P]) GetEnv() string     { return a.Env }
+func (a *ArgumentOf[T, P]) GetDefault() any    { return a.Default }
 func (a *ArgumentOf[T, P]) GetRequired() bool  { return a.Required }
 func (a *ArgumentOf[T, P]) Set(s string) error { return setDest(a.Dest, s, parseWith[T, P]) }
 func (a *ArgumentOf[T, P]) SetDefault()        { setDestDefault(a.Dest, a.Default) }

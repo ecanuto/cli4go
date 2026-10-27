@@ -651,7 +651,7 @@ func TestValidate(t *testing.T) {
 				Name: "myprogram",
 				Arguments: []Argument{
 					&StringArgument{Name: "qux", Env: "APP_QUX"},
-					&StringArgument{Name: "quux", Env: "APP_QUX"},
+					&StringArgument{Name: "baz", Env: "APP_QUX"},
 				},
 			},
 			wantErr: true,
@@ -1749,10 +1749,10 @@ func TestUsageString(t *testing.T) {
 				Name: "myprogram",
 				Arguments: []Argument{
 					&StringArgument{Name: "qux"},
-					&StringArgument{Name: "quux"},
+					&StringArgument{Name: "baz"},
 				},
 			},
-			want: "Usage: myprogram [options] [qux] [quux]\n",
+			want: "Usage: myprogram [options] [qux] [baz]\n",
 		},
 		{
 			// Brackets mean optional, so a Required Argument is bare.
@@ -1761,10 +1761,10 @@ func TestUsageString(t *testing.T) {
 				Name: "myprogram",
 				Arguments: []Argument{
 					&StringArgument{Name: "qux", Required: true},
-					&StringArgument{Name: "quux"},
+					&StringArgument{Name: "baz"},
 				},
 			},
-			want: "Usage: myprogram [options] qux [quux]\n",
+			want: "Usage: myprogram [options] qux [baz]\n",
 		},
 		{
 			// Options never affects the usage line beyond the constant
@@ -1800,6 +1800,91 @@ func TestPrintUsage(t *testing.T) {
 
 	if got, want := buf.String(), "Usage: myprogram [options] [qux]\n"; got != want {
 		t.Errorf("PrintUsage() wrote %q, want %q", got, want)
+	}
+}
+
+// TestOptionLabel covers the value placeholder the help shows after an
+// Option's long form: the upper-cased GetName() in angle brackets, except
+// for a BoolOption, which takes no value.
+func TestOptionLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		opt  Option
+		want string
+	}{
+		{name: "long form gets a placeholder", opt: &StringOption{Long: "--bar"}, want: "--bar <BAR>"},
+		{name: "explicit Name drives the placeholder", opt: &IntOption{Long: "--count", Name: "n"}, want: "--count <N>"},
+		{name: "flag-only shows the placeholder alone", opt: &StringOption{Flag: "-s"}, want: "<S>"},
+		{name: "a BoolOption has no placeholder", opt: &BoolOption{Long: "--foo"}, want: "--foo"},
+		{name: "a flag-only BoolOption is empty", opt: &BoolOption{Flag: "-f"}, want: ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := optionLabel(tt.opt); got != tt.want {
+				t.Errorf("optionLabel() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// nilDefault is an item whose GetDefault returns nil, as a hand-written
+// type with no default might.
+type nilDefault struct{ item }
+
+func (nilDefault) GetDefault() any { return nil }
+
+// TestDescribe covers the description the help shows for an item: its
+// Help, followed by the environment variable it falls back to, if any.
+func TestDescribe(t *testing.T) {
+	tests := []struct {
+		name string
+		it   item
+		want string
+	}{
+		{name: "help only", it: &StringArgument{Name: "qux", Help: "The qux"}, want: "The qux"},
+		{name: "help and env", it: &StringArgument{Name: "qux", Help: "The qux", Env: "APP_QUX"}, want: "The qux [env: APP_QUX]"},
+		{name: "env without help", it: &StringArgument{Name: "qux", Env: "APP_QUX"}, want: "[env: APP_QUX]"},
+		{name: "neither", it: &StringArgument{Name: "qux"}, want: ""},
+		{name: "non-zero default", it: &StringOption{Long: "--bar", Help: "Bar", Default: "x"}, want: `Bar [default: "x"]`},
+		{name: "env and default", it: &IntOption{Long: "--n", Help: "N", Env: "APP_N", Default: 3}, want: "N [env: APP_N] [default: 3]"},
+		{name: "default without help", it: &IntArgument{Name: "n", Default: 3}, want: "[default: 3]"},
+		{name: "true default", it: &BoolOption{Long: "--on", Help: "On", Default: true}, want: "On [default: true]"},
+		{name: "zero defaults are not shown", it: &BoolOption{Long: "--on", Help: "On"}, want: "On"},
+		{name: "a Required item shows no default", it: &StringArgument{Name: "qux", Help: "Qux", Default: "x", Required: true}, want: "Qux"},
+		{name: "an EnvVar shows its default", it: &StringEnvVar{Name: "APP_X", Help: "X", Default: "y"}, want: `X [env: APP_X] [default: "y"]`},
+		{name: "a nil GetDefault shows none", it: nilDefault{&StringArgument{Name: "qux", Help: "Qux"}}, want: "Qux"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := describe(tt.it); got != tt.want {
+				t.Errorf("describe() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestGetDefault covers GetDefault() across the generic types.
+func TestGetDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		it   item
+		want any
+	}{
+		{name: "StringArgument", it: &StringArgument{Name: "a", Default: "x"}, want: "x"},
+		{name: "IntOption", it: &IntOption{Long: "--n", Default: 7}, want: 7},
+		{name: "BoolOption", it: &BoolOption{Long: "--on", Default: true}, want: true},
+		{name: "StringEnvVar", it: &StringEnvVar{Name: "APP_X", Default: "y"}, want: "y"},
+		{name: "unset is the zero value", it: &IntArgument{Name: "n"}, want: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.it.GetDefault(); got != tt.want {
+				t.Errorf("GetDefault() = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -1861,9 +1946,9 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options]",
 				"",
 				"Options:",
-				"  -f, --file      Specify file name",
-				"  -h, --help      Print help",
-				"  -v, --version   Print version",
+				"  -f, --file <FILE>   Specify file name",
+				"  -h, --help          Print help",
+				"  -v, --version       Print version",
 			},
 		},
 		{
@@ -1881,11 +1966,11 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options]",
 				"",
 				"Options:",
-				"  -f              Enable foo mode",
-				"  -b, --bar       Enable bar mode",
-				"      --grault    Enable grault mode",
-				"  -h, --help      Print help",
-				"  -v, --version   Print version",
+				"  -f  <F>                 Enable foo mode",
+				"  -b, --bar <BAR>         Enable bar mode",
+				"      --grault <GRAULT>   Enable grault mode",
+				"  -h, --help              Print help",
+				"  -v, --version           Print version",
 			},
 		},
 		{
@@ -1917,11 +2002,11 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options] [qux]",
 				"",
 				"Arguments:",
-				"  qux          The qux to operate on",
+				"  qux               The qux to operate on",
 				"",
 				"Options:",
-				"  -b, --bar    Set the bar value",
-				"  -h, --help   Print help",
+				"  -b, --bar <BAR>   Set the bar value",
+				"  -h, --help        Print help",
 			},
 		},
 		{
@@ -1930,15 +2015,15 @@ func TestHelpString(t *testing.T) {
 				Name: "myprogram",
 				Arguments: []Argument{
 					&StringArgument{Name: "qux", Help: "The qux to operate on"},
-					&StringArgument{Name: "quuxlong", Help: "The quuxlong to operate on"},
+					&StringArgument{Name: "bazlong", Help: "The bazlong to operate on"},
 				},
 			},
 			want: []string{
-				"Usage: myprogram [options] [qux] [quuxlong]",
+				"Usage: myprogram [options] [qux] [bazlong]",
 				"",
 				"Arguments:",
 				"  qux          The qux to operate on",
-				"  quuxlong     The quuxlong to operate on",
+				"  bazlong      The bazlong to operate on",
 				"",
 				"Options:",
 				"  -h, --help   Print help",
@@ -1959,7 +2044,7 @@ func TestHelpString(t *testing.T) {
 				"  argumentwithalongname   Wide one",
 				"",
 				"Options:",
-				"  -f                      Enable foo mode",
+				"  -f  <F>                 Enable foo mode",
 				"  -h, --help              Print help",
 				"  -v, --version           Print version",
 			},
@@ -1974,11 +2059,11 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options]",
 				"",
 				"Options:",
-				"  -b, --bar     Set the bar value",
-				"  -h, --help    Print help",
+				"  -b, --bar <BAR>   Set the bar value [env: PROGRAM_BAR]",
+				"  -h, --help        Print help",
 				"",
 				"Environment Variables:",
-				"  PROGRAM_BAR   Set the bar value",
+				"  PROGRAM_BAR       Set the bar value",
 			},
 		},
 		{
@@ -1991,7 +2076,7 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options] [qux]",
 				"",
 				"Arguments:",
-				"  qux           The qux to operate on",
+				"  qux           The qux to operate on [env: PROGRAM_QUX]",
 				"",
 				"Options:",
 				"  -h, --help    Print help",
@@ -2012,15 +2097,15 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options] [qux]",
 				"",
 				"Arguments:",
-				"  qux          The qux to operate on",
+				"  qux               The qux to operate on [env: APP_QUX]",
 				"",
 				"Options:",
-				"  -b, --bar    Set the bar value",
-				"  -h, --help   Print help",
+				"  -b, --bar <BAR>   Set the bar value [env: APP_BAR]",
+				"  -h, --help        Print help",
 				"",
 				"Environment Variables:",
-				"  APP_QUX      The qux to operate on",
-				"  APP_BAR      Set the bar value",
+				"  APP_QUX           The qux to operate on",
+				"  APP_BAR           Set the bar value",
 			},
 		},
 		{
@@ -2035,11 +2120,32 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options]",
 				"",
 				"Options:",
-				"  -b, --bar                      Set the bar value",
+				"  -b, --bar <BAR>                Set the bar value [env: PROGRAM_REALLY_LONG_BAR_NAME]",
 				"  -h, --help                     Print help",
 				"",
 				"Environment Variables:",
 				"  PROGRAM_REALLY_LONG_BAR_NAME   Set the bar value",
+			},
+		},
+		{
+			name: "non-zero defaults are shown after the description and the env note",
+			cmd: Command{
+				Name: "myprogram",
+				Options: []Option{
+					&StringOption{Flag: "-b", Long: "--bar", Help: "Set the bar value", Env: "PROGRAM_BAR", Default: "default-bar"},
+					&IntOption{Long: "--count", Help: "How many", Default: 0},
+				},
+			},
+			want: []string{
+				"Usage: myprogram [options]",
+				"",
+				"Options:",
+				"  -b, --bar <BAR>       Set the bar value [env: PROGRAM_BAR] [default: \"default-bar\"]",
+				"      --count <COUNT>   How many",
+				"  -h, --help            Print help",
+				"",
+				"Environment Variables:",
+				"  PROGRAM_BAR           Set the bar value",
 			},
 		},
 		{
@@ -2048,7 +2154,7 @@ func TestHelpString(t *testing.T) {
 				Name: "myprogram",
 				Arguments: []Argument{
 					&StringArgument{Name: "qux", Help: "The qux to operate on", Env: "APP_QUX"},
-					&StringArgument{Name: "quux", Help: "No env for this one"},
+					&StringArgument{Name: "baz", Help: "No env for this one"},
 				},
 				Options: []Option{
 					&StringOption{Flag: "-f", Help: "No env for this one either"},
@@ -2056,20 +2162,20 @@ func TestHelpString(t *testing.T) {
 				},
 			},
 			want: []string{
-				"Usage: myprogram [options] [qux] [quux]",
+				"Usage: myprogram [options] [qux] [baz]",
 				"",
 				"Arguments:",
-				"  qux          The qux to operate on",
-				"  quux         No env for this one",
+				"  qux               The qux to operate on [env: APP_QUX]",
+				"  baz               No env for this one",
 				"",
 				"Options:",
-				"  -f           No env for this one either",
-				"  -b, --bar    Set the bar value",
-				"  -h, --help   Print help",
+				"  -f  <F>           No env for this one either",
+				"  -b, --bar <BAR>   Set the bar value [env: APP_BAR]",
+				"  -h, --help        Print help",
 				"",
 				"Environment Variables:",
-				"  APP_QUX      The qux to operate on",
-				"  APP_BAR      Set the bar value",
+				"  APP_QUX           The qux to operate on",
+				"  APP_BAR           Set the bar value",
 			},
 		},
 		{
@@ -2086,16 +2192,16 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options] [qux]",
 				"",
 				"Arguments:",
-				"  qux          The qux to operate on",
+				"  qux               The qux to operate on [env: APP_QUX]",
 				"",
 				"Options:",
-				"  -b, --bar    Set the bar value",
-				"  -h, --help   Print help",
+				"  -b, --bar <BAR>   Set the bar value [env: APP_BAR]",
+				"  -h, --help        Print help",
 				"",
 				"Environment Variables:",
-				"  APP_QUX      The qux to operate on",
-				"  APP_BAR      Set the bar value",
-				"  APP_DEBUG    Enable debug logging",
+				"  APP_QUX           The qux to operate on",
+				"  APP_BAR           Set the bar value",
+				"  APP_DEBUG         Enable debug logging",
 			},
 		},
 		{
@@ -2112,9 +2218,9 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options]",
 				"",
 				"Options:",
-				"  -v, --verbose   Verbose output",
-				"  -h, --help      Print help",
-				"  -V, --version   Print version",
+				"  -v, --verbose <VERBOSE>   Verbose output",
+				"  -h, --help                Print help",
+				"  -V, --version             Print version",
 			},
 		},
 		{
@@ -2135,7 +2241,7 @@ func TestHelpString(t *testing.T) {
 				"Usage: myprogram [options]",
 				"",
 				"Options:",
-				"  -h, --help   Show this message",
+				"  -h, --help <HELP>   Show this message",
 			},
 		},
 	}

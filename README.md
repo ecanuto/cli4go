@@ -35,8 +35,8 @@ func main() {
 		Description: "My foo bar program",
 		Arguments: []cli.Argument{
 			&cli.StringArgument{
-				Name: "qux", 
-				Help: "The qux to operate on", Dest: &cfg.Foo,
+				Name: "qux",
+				Help: "The qux to operate on", Dest: &cfg.Qux,
 			},
 		},
 		Options: []cli.Option{
@@ -71,12 +71,12 @@ Arguments:
 
 Options:
   -f, --foo         Enable foo mode
-  -b, --bar <BAR>   Set the bar value (default: "default-bar")
+  -b, --bar <BAR>   Set the bar value [env: PROGRAM_BAR] [default: default-bar]
   -h, --help        Print help
   -v, --version     Print version
 
 Environment Variables:
-  PROGRAM_BAR       Set the bar value (default: "default-bar")
+  PROGRAM_BAR       Set the bar value
 
 $ ./myprogram -f -b hello widget-42
 myprogram: foo=true, bar="hello", qux="widget-42"

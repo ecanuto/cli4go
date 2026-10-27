@@ -28,6 +28,10 @@ type EnvVar interface {
 	// same as GetName.
 	GetEnv() string
 
+	// GetDefault returns Default as a plain value (a string, an int, ...),
+	// which is the zero value of its type when none was declared.
+	GetDefault() any
+
 	// GetRequired reports whether Parse fails with a usage error when the
 	// environment variable is not set.
 	GetRequired() bool
@@ -85,6 +89,7 @@ type EnvVarOf[T any, P Parser[T]] struct {
 func (e *EnvVarOf[T, P]) GetName() string    { return e.Name }
 func (e *EnvVarOf[T, P]) GetHelp() string    { return e.Help }
 func (e *EnvVarOf[T, P]) GetEnv() string     { return e.Name }
+func (e *EnvVarOf[T, P]) GetDefault() any    { return e.Default }
 func (e *EnvVarOf[T, P]) GetRequired() bool  { return e.Required }
 func (e *EnvVarOf[T, P]) Set(s string) error { return setDest(e.Dest, s, parseWith[T, P]) }
 func (e *EnvVarOf[T, P]) SetDefault()        { setDestDefault(e.Dest, e.Default) }

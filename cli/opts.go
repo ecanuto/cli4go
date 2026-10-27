@@ -41,6 +41,10 @@ type Option interface {
 	// falls back to when the command line does not set it, or "" if none.
 	GetEnv() string
 
+	// GetDefault returns Default as a plain value (a string, an int, ...),
+	// which is the zero value of its type when none was declared.
+	GetDefault() any
+
 	// GetAction returns the hook that runs when this Option is seen on
 	// the command line, or nil if none (see Action).
 	GetAction() Action
@@ -158,6 +162,7 @@ func (o *OptionOf[T, P]) GetFlag() string    { return normalizeDashes(o.Flag, 1)
 func (o *OptionOf[T, P]) GetLong() string    { return normalizeDashes(o.Long, 2) }
 func (o *OptionOf[T, P]) GetHelp() string    { return o.Help }
 func (o *OptionOf[T, P]) GetEnv() string     { return o.Env }
+func (o *OptionOf[T, P]) GetDefault() any    { return o.Default }
 func (o *OptionOf[T, P]) GetAction() Action  { return o.Action }
 func (o *OptionOf[T, P]) GetRequired() bool  { return o.Required }
 func (o *OptionOf[T, P]) Set(s string) error { return setDest(o.Dest, s, parseWith[T, P]) }

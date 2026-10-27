@@ -8,6 +8,7 @@ import (
 	"io"
 	"iter"
 	"os"
+	"reflect"
 
 	"slices"
 	"strings"
@@ -28,6 +29,7 @@ type item interface {
 	GetName() string
 	GetHelp() string
 	GetEnv() string
+	GetDefault() any
 	GetRequired() bool
 	Set(s string) error
 	SetDefault()
@@ -619,10 +621,11 @@ func (c *Command) HelpString() string {
 	var b strings.Builder
 
 	// Compute the shared column width from the longest Argument.Name, the
-	// longest normalized long flag (e.g. "--bar") plus 4 characters for the
-	// "-x, " short flag column an Option row has but an Argument row
-	// doesn't, and the longest environment variable name. Each is computed
-	// on its own and combined below.
+	// longest Option label (its long form plus its value placeholder, e.g.
+	// "--bar <BAR>") plus 4 characters for the "-x, " short flag column an
+	// Option row has but an Argument row doesn't, and the longest
+	// environment variable name. Each is computed on its own and combined
+	// below.
 	var widthArgs, widthOpts, widthEnvs int
 	for _, arg := range c.Arguments {
 		if w := len(arg.GetName()); w > widthArgs {
@@ -630,7 +633,7 @@ func (c *Command) HelpString() string {
 		}
 	}
 	for opt := range c.options() {
-		if w := len(opt.GetLong()) + 4; w > widthOpts { // 4 = len("-x, ")
+		if w := len(optionLabel(opt)) + 4; w > widthOpts { // 4 = len("-x, ")
 			widthOpts = w
 		}
 	}
@@ -653,7 +656,7 @@ func (c *Command) HelpString() string {
 	if len(c.Arguments) > 0 {
 		fmt.Fprintf(&b, "\nArguments:\n")
 		for _, arg := range c.Arguments {
-			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.GetName(), arg.GetHelp())
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, arg.GetName(), describe(arg))
 		}
 	}
 
@@ -666,13 +669,12 @@ func (c *Command) HelpString() string {
 	fmt.Fprintf(&b, "\nOptions:\n")
 	for opt := range c.options() {
 		flag := opt.GetFlag()
-		long := opt.GetLong()
-		if flag != "" && long != "" {
+		if flag != "" && opt.GetLong() != "" {
 			flag += ","
 		}
 		fmt.Fprintf(&b,
 			"  %-3s %-*s   %s\n",
-			flag, width-4, long, opt.GetHelp(), // 4 = len("-x, ")
+			flag, width-4, optionLabel(opt), describe(opt), // 4 = len("-x, ")
 		)
 	}
 
@@ -689,6 +691,40 @@ func (c *Command) HelpString() string {
 	}
 
 	return b.String()
+}
+
+// optionLabel returns what the help shows for an Option after its short
+// form: the long form followed by a value placeholder -- the upper-cased
+// GetName() in angle brackets, e.g. "--bar <BAR>" -- unless the Option is a
+// *BoolOption, which takes no value. An Option with no long form shows the
+// placeholder alone.
+func optionLabel(opt Option) string {
+	label := opt.GetLong()
+	if _, isBool := opt.(*BoolOption); isBool {
+		return label
+	}
+	if label != "" {
+		label += " "
+	}
+	return label + "<" + strings.ToUpper(opt.GetName()) + ">"
+}
+
+// describe returns the description the help shows for an item: its Help,
+// then "[env: NAME]" when it falls back to an environment variable, then
+// "[default: VALUE]" when it has a non-zero Default. A Required item shows
+// no default, since it would never apply.
+func describe(it item) string {
+	var parts []string
+	if help := it.GetHelp(); help != "" {
+		parts = append(parts, help)
+	}
+	if env := it.GetEnv(); env != "" {
+		parts = append(parts, "[env: "+env+"]")
+	}
+	if def := it.GetDefault(); !it.GetRequired() && def != nil && !reflect.ValueOf(def).IsZero() {
+		parts = append(parts, fmt.Sprintf("[default: %#v]", def))
+	}
+	return strings.Join(parts, " ")
 }
 
 // PrintHelp writes HelpString (the full help text) to c.Stdout (os.Stdout
