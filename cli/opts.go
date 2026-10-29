@@ -72,10 +72,7 @@ type Option interface {
 }
 
 // normalizeDashes returns s with exactly dashes leading dashes, whatever
-// it had before: the rule behind both a Flag ("f", "-f", "--f" -> "-f")
-// and a Long ("bar", "-bar", "---bar" -> "--bar"). A single dash on a
-// Long is a likely typo, so it is normalized rather than rejected. An
-// empty s stays empty.
+// it had before. An empty s stays empty.
 func normalizeDashes(s string, dashes int) string {
 	if s == "" {
 		return s
@@ -83,11 +80,27 @@ func normalizeDashes(s string, dashes int) string {
 	return strings.Repeat("-", dashes) + strings.TrimLeft(s, "-")
 }
 
-// optionName returns the identifier of an Option: name when set,
+// NormalizeFlag returns s as a short form with exactly one leading dash
+// ("f", "-f", "--f" -> "-f"), or "" when s is empty. It is the rule
+// behind every Option's GetFlag, and what an Option implemented outside
+// this package should apply to its own flag.
+func NormalizeFlag(s string) string { return normalizeDashes(s, 1) }
+
+// NormalizeLong returns s as a long form with exactly two leading dashes
+// ("bar", "-bar", "---bar" -> "--bar"), or "" when s is empty. A single
+// dash on a long form is a likely typo, so it is normalized rather than
+// rejected. It is the rule behind every Option's GetLong, and what an
+// Option implemented outside this package should apply to its own long
+// form.
+func NormalizeLong(s string) string { return normalizeDashes(s, 2) }
+
+// OptionName returns the identifier of an Option: name when set,
 // otherwise long without its "--", otherwise flag without its "-". flag
-// and long are expected normalized (see normalizeDashes); Validate guarantees
-// one of them is set, so a validated Option's name is never empty.
-func optionName(name, flag, long string) string {
+// and long are expected normalized (see NormalizeFlag and NormalizeLong);
+// Validate guarantees one of them is set, so a validated
+// Option's name is never empty. It is the rule behind every Option's
+// GetName.
+func OptionName(name, flag, long string) string {
 	switch {
 	case name != "":
 		return name
@@ -157,9 +170,9 @@ type OptionOf[T any, P Parser[T]] struct {
 	Required bool
 }
 
-func (o *OptionOf[T, P]) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
-func (o *OptionOf[T, P]) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *OptionOf[T, P]) GetLong() string    { return normalizeDashes(o.Long, 2) }
+func (o *OptionOf[T, P]) GetName() string    { return OptionName(o.Name, o.GetFlag(), o.GetLong()) }
+func (o *OptionOf[T, P]) GetFlag() string    { return NormalizeFlag(o.Flag) }
+func (o *OptionOf[T, P]) GetLong() string    { return NormalizeLong(o.Long) }
 func (o *OptionOf[T, P]) GetHelp() string    { return o.Help }
 func (o *OptionOf[T, P]) GetEnv() string     { return o.Env }
 func (o *OptionOf[T, P]) GetDefault() any    { return o.Default }

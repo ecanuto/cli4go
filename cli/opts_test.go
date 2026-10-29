@@ -137,3 +137,55 @@ func TestOption_Validate(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeFlag(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"", ""},
+		{"f", "-f"},
+		{"-f", "-f"},
+		{"--f", "-f"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := NormalizeFlag(tt.in); got != tt.want {
+				t.Errorf("NormalizeFlag(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeLong(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"", ""},
+		{"bar", "--bar"},
+		{"-bar", "--bar"},
+		{"--bar", "--bar"},
+		{"---bar", "--bar"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			if got := NormalizeLong(tt.in); got != tt.want {
+				t.Errorf("NormalizeLong(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOptionNameFunc(t *testing.T) {
+	tests := []struct {
+		name             string
+		optName          string
+		flag, long, want string
+	}{
+		{name: "explicit name wins", optName: "x", flag: "-f", long: "--foo", want: "x"},
+		{name: "long without dashes", flag: "-f", long: "--foo", want: "foo"},
+		{name: "flag without dash", flag: "-f", want: "f"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := OptionName(tt.optName, tt.flag, tt.long); got != tt.want {
+				t.Errorf("OptionName(%q, %q, %q) = %q, want %q", tt.optName, tt.flag, tt.long, got, tt.want)
+			}
+		})
+	}
+}
