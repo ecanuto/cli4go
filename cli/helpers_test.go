@@ -84,9 +84,9 @@ func TestSetDest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := SetDest(tt.dest, tt.input, parse)
+			err := setDest(tt.dest, tt.input, parse)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("SetDest() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("setDest() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.dest != nil && *tt.dest != tt.want {
 				t.Errorf("*dest = %d, want %d", *tt.dest, tt.want)
@@ -109,7 +109,7 @@ func TestSetDestDefault(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			SetDestDefault(tt.dest, tt.def)
+			setDestDefault(tt.dest, tt.def)
 			if tt.dest != nil && *tt.dest != tt.want {
 				t.Errorf("*dest = %q, want %q", *tt.dest, tt.want)
 			}
