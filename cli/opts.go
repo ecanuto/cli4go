@@ -165,8 +165,8 @@ func (o *OptionOf[T, P]) GetEnv() string     { return o.Env }
 func (o *OptionOf[T, P]) GetDefault() any    { return o.Default }
 func (o *OptionOf[T, P]) GetAction() Action  { return o.Action }
 func (o *OptionOf[T, P]) GetRequired() bool  { return o.Required }
-func (o *OptionOf[T, P]) Set(s string) error { return setDest(o.Dest, s, parseWith[T, P]) }
-func (o *OptionOf[T, P]) SetDefault()        { setDestDefault(o.Dest, o.Default) }
+func (o *OptionOf[T, P]) Set(s string) error { return SetDest(o.Dest, s, parseWith[T, P]) }
+func (o *OptionOf[T, P]) SetDefault()        { SetDestDefault(o.Dest, o.Default) }
 
 // Validate checks the normalized flag and long forms.
 func (o *OptionOf[T, P]) Validate() error {

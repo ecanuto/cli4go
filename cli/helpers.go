@@ -50,11 +50,12 @@ func parseWith[T any, P Parser[T]](s string) (T, error) {
 	return p.Parse(s)
 }
 
-// setDest converts s with parse and stores the result in dest, doing
-// nothing -- and returning nil -- when dest is unset. It is the base
-// behavior behind every item's Set method: only parse differs
+// SetDest converts s with parse and stores the result in dest, doing
+// nothing -- and returning nil -- when dest is unset. It is the behavior
+// behind every built-in item's Set method, and what a type implemented
+// outside this package should call from its own Set: only parse differs
 // from one type to the next. On a conversion error dest is left alone.
-func setDest[T any](dest *T, s string, parse func(string) (T, error)) error {
+func SetDest[T any](dest *T, s string, parse func(string) (T, error)) error {
 	if dest == nil {
 		return nil
 	}
@@ -66,10 +67,12 @@ func setDest[T any](dest *T, s string, parse func(string) (T, error)) error {
 	return nil
 }
 
-// setDestDefault stores def in dest, when dest is set. It is the base
-// behavior behind every item's SetDefault method: def and dest
-// are the same Go type, so it can never fail.
-func setDestDefault[T any](dest *T, def T) {
+// SetDestDefault stores def in dest, when dest is set. It is the behavior
+// behind every built-in item's SetDefault method, and what a type
+// implemented outside this package should call from its own SetDefault:
+// def and dest are the same Go type, so it can never fail. The zero value
+// of def is stored like any other.
+func SetDestDefault[T any](dest *T, def T) {
 	if dest != nil {
 		*dest = def
 	}

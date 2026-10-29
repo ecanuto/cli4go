@@ -104,8 +104,8 @@ func (a *ArgumentOf[T, P]) GetHelp() string    { return a.Help }
 func (a *ArgumentOf[T, P]) GetEnv() string     { return a.Env }
 func (a *ArgumentOf[T, P]) GetDefault() any    { return a.Default }
 func (a *ArgumentOf[T, P]) GetRequired() bool  { return a.Required }
-func (a *ArgumentOf[T, P]) Set(s string) error { return setDest(a.Dest, s, parseWith[T, P]) }
-func (a *ArgumentOf[T, P]) SetDefault()        { setDestDefault(a.Dest, a.Default) }
+func (a *ArgumentOf[T, P]) Set(s string) error { return SetDest(a.Dest, s, parseWith[T, P]) }
+func (a *ArgumentOf[T, P]) SetDefault()        { SetDestDefault(a.Dest, a.Default) }
 
 // Validate requires a display name, which shows in the usage line and
 // the "Arguments:" help section.

@@ -91,8 +91,8 @@ func (e *EnvVarOf[T, P]) GetHelp() string    { return e.Help }
 func (e *EnvVarOf[T, P]) GetEnv() string     { return e.Name }
 func (e *EnvVarOf[T, P]) GetDefault() any    { return e.Default }
 func (e *EnvVarOf[T, P]) GetRequired() bool  { return e.Required }
-func (e *EnvVarOf[T, P]) Set(s string) error { return setDest(e.Dest, s, parseWith[T, P]) }
-func (e *EnvVarOf[T, P]) SetDefault()        { setDestDefault(e.Dest, e.Default) }
+func (e *EnvVarOf[T, P]) Set(s string) error { return SetDest(e.Dest, s, parseWith[T, P]) }
+func (e *EnvVarOf[T, P]) SetDefault()        { SetDestDefault(e.Dest, e.Default) }
 
 // Validate requires a name, since the name is the environment variable
 // itself.
