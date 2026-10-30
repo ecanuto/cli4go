@@ -42,11 +42,6 @@ type item interface {
 // (flags), and its standalone EnvVars. A Command is plain data — build
 // it as a struct literal, then call Parse to read os.Args into the
 // bound variables.
-//
-// Program is an alias for Command, the conventional name for the common
-// single-command case (a CLI with no subcommands). The two are
-// identical to the compiler. There is no mechanism for declaring
-// subcommands.
 type Command struct {
 	// Name is the program's name, shown in usage and version output.
 	Name string
