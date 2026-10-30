@@ -457,7 +457,7 @@ func (c *Command) Parse(args []string) *Error {
 				return c.PrintErrorf("option %q: %w", tok, setErr)
 			}
 
-			// See the Action doc comment for its nil/non-nil contract.
+			// See OptionAction for its nil/non-nil contract.
 			if action := opt.GetAction(); action != nil {
 				if err := action(c, opt, value); err != nil {
 					return err

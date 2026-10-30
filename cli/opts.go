@@ -46,8 +46,8 @@ type Option interface {
 	GetDefault() any
 
 	// GetAction returns the hook that runs when this Option is seen on
-	// the command line, or nil if none (see Action).
-	GetAction() Action
+	// the command line, or nil if none (see OptionAction).
+	GetAction() OptionAction
 
 	// GetRequired reports whether Parse fails with a usage error when
 	// neither the command line nor GetEnv's variable sets this Option.
@@ -136,7 +136,7 @@ type OptionOf[T any, P Parser[T]] struct {
 	// Dest binds the parsed value directly to a variable, e.g.
 	// &cfg.Bar. Optional -- without it the value is still available
 	// through GetValue and Command.Lookup. May be combined with Action --
-	// see the Action doc comment for the exact resolution order.
+	// see OptionAction for the exact resolution order.
 	Dest *T
 
 	// Default is assigned to Dest when neither the command line nor Env
@@ -149,9 +149,9 @@ type OptionOf[T any, P Parser[T]] struct {
 	Env string
 
 	// Action, if set, runs when this Option's flag is seen on the
-	// command line -- see the Action doc comment for its exact contract
+	// command line -- see OptionAction for its exact contract
 	// and how it combines with Dest.
-	Action Action
+	Action OptionAction
 
 	// Required makes Parse fail with a usage error (ExitCode() == 2)
 	// when this option is resolved from neither the command line nor
@@ -164,17 +164,17 @@ type OptionOf[T any, P Parser[T]] struct {
 	value T
 }
 
-func (o *OptionOf[T, P]) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
-func (o *OptionOf[T, P]) GetFlag() string    { return normalizeDashes(o.Flag, 1) }
-func (o *OptionOf[T, P]) GetLong() string    { return normalizeDashes(o.Long, 2) }
-func (o *OptionOf[T, P]) GetHelp() string    { return o.Help }
-func (o *OptionOf[T, P]) GetEnv() string     { return o.Env }
-func (o *OptionOf[T, P]) GetDefault() any    { return o.Default }
-func (o *OptionOf[T, P]) GetAction() Action  { return o.Action }
-func (o *OptionOf[T, P]) GetRequired() bool  { return o.Required }
-func (o *OptionOf[T, P]) GetValue() any      { return o.value }
-func (o *OptionOf[T, P]) Set(s string) error { return setValue(&o.value, o.Dest, s, parseWith[T, P]) }
-func (o *OptionOf[T, P]) SetDefault()        { setValueDefault(&o.value, o.Dest, o.Default) }
+func (o *OptionOf[T, P]) GetName() string         { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
+func (o *OptionOf[T, P]) GetFlag() string         { return normalizeDashes(o.Flag, 1) }
+func (o *OptionOf[T, P]) GetLong() string         { return normalizeDashes(o.Long, 2) }
+func (o *OptionOf[T, P]) GetHelp() string         { return o.Help }
+func (o *OptionOf[T, P]) GetEnv() string          { return o.Env }
+func (o *OptionOf[T, P]) GetDefault() any         { return o.Default }
+func (o *OptionOf[T, P]) GetAction() OptionAction { return o.Action }
+func (o *OptionOf[T, P]) GetRequired() bool       { return o.Required }
+func (o *OptionOf[T, P]) GetValue() any           { return o.value }
+func (o *OptionOf[T, P]) Set(s string) error      { return setValue(&o.value, o.Dest, s, parseWith[T, P]) }
+func (o *OptionOf[T, P]) SetDefault()             { setValueDefault(&o.value, o.Dest, o.Default) }
 
 // Validate checks the normalized flag and long forms.
 func (o *OptionOf[T, P]) Validate() error {
@@ -203,13 +203,13 @@ type StringOption = OptionOf[string, stringParser]
 type IntOption = OptionOf[int, intParser]
 
 // BoolOption is a boolean flag -- one whose mere presence on the command
-// line sets it, never consuming a following token (see the Action doc
+// line sets it, never consuming a following token (see the OptionAction doc
 // comment). The type itself is what says "this flag is boolean".
 type BoolOption = OptionOf[bool, boolParser]
 
-// --- Action ------------------------------------------------------------------
+// --- OptionAction ------------------------------------------------------------
 
-// Action is a hook that runs when its Option's flag is seen on the
+// OptionAction is a hook that runs when its Option's flag is seen on the
 // command line. Parse calls it as opt.GetAction()(c, opt, value): c is
 // the Command being parsed (so an Action can call c.PrintHelp,
 // c.PrintVersion, or c.PrintErrorf, as Parse itself does), opt is the
@@ -237,4 +237,4 @@ type BoolOption = OptionOf[bool, boolParser]
 // each is a *BoolOption with a throwaway Dest and an Action that prints
 // and returns ErrHelp/ErrVersion. A user-declared Option can do the
 // same, with no special status for the built-ins.
-type Action func(c *Command, opt Option, value string) *Error
+type OptionAction func(c *Command, opt Option, value string) *Error
