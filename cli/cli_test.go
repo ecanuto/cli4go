@@ -2646,3 +2646,191 @@ func TestLookup(t *testing.T) {
 		}
 	})
 }
+
+// --- Commands ----------------------------------------------------------------
+
+func TestValidate_Commands(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  *Command
+		want string // substring of the error; "" means valid
+	}{
+		{"valid", &Command{Name: "app", Commands: []*Command{{Name: "serve"}, {Name: "build"}}}, ""},
+		{"Arguments next to Commands", &Command{
+			Name:      "app",
+			Arguments: []Argument{&StringArgument{Name: "x"}},
+			Commands:  []*Command{{Name: "serve"}},
+		}, "both Arguments and Commands"},
+		{"invalid subcommand", &Command{Name: "app", Commands: []*Command{{}}}, "Name must not be empty"},
+		{"duplicate name", &Command{Name: "app", Commands: []*Command{{Name: "serve"}, {Name: "serve"}}}, `duplicate subcommand "serve"`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cmd.Validate()
+			if tt.want == "" {
+				if err != nil {
+					t.Fatalf("Validate() = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("Validate() = %v, want an error containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParse_Commands(t *testing.T) {
+	newApp := func(verbose *bool, port *int, out, errOut io.Writer) *Command {
+		return &Command{
+			Name:    "app",
+			Options: []Option{&BoolOption{Flag: "-V", Long: "--verbose", Dest: verbose}},
+			Commands: []*Command{
+				{
+					Name:        "serve",
+					Description: "Run the server",
+					Options:     []Option{&IntOption{Long: "--port", Default: 80, Dest: port}},
+				},
+				{Name: "build"},
+			},
+			Stdout: out,
+			Stderr: errOut,
+		}
+	}
+
+	t.Run("the subcommand parses the rest", func(t *testing.T) {
+		var verbose bool
+		var port int
+		app := newApp(&verbose, &port, io.Discard, io.Discard)
+		if err := app.Parse([]string{"-V", "serve", "--port", "8080"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !verbose || port != 8080 {
+			t.Errorf("verbose = %v, port = %d; want true, 8080", verbose, port)
+		}
+	})
+
+	t.Run("the parent resolves its own items first", func(t *testing.T) {
+		var errOut bytes.Buffer
+		app := newApp(new(bool), new(int), io.Discard, &errOut)
+		app.EnvVars = []EnvVar{&StringEnvVar{Name: "APP_TOKEN_UNSET", Required: true}}
+		os.Unsetenv("APP_TOKEN_UNSET")
+		if err := app.Parse([]string{"build"}); err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want exit 2", err)
+		}
+		if !strings.Contains(errOut.String(), `"APP_TOKEN_UNSET" is required`) {
+			t.Errorf("stderr = %q", errOut.String())
+		}
+	})
+
+	errTests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown command", []string{"nope"}, `error: unknown command "nope"`},
+		{"missing command", []string{"-V"}, "error: a command is required"},
+		{"error inside a subcommand", []string{"serve", "--bogus"}, "Usage: app serve [options]"},
+	}
+	for _, tt := range errTests {
+		t.Run(tt.name, func(t *testing.T) {
+			var errOut bytes.Buffer
+			app := newApp(new(bool), new(int), io.Discard, &errOut)
+			app.Commands[0].Stderr = &errOut // a subcommand has its own streams
+			if err := app.Parse(tt.args); err == nil || err.ExitCode() != 2 {
+				t.Fatalf("Parse() = %v, want exit 2", err)
+			}
+			if !strings.Contains(errOut.String(), tt.want) {
+				t.Errorf("stderr = %q, want it to contain %q", errOut.String(), tt.want)
+			}
+		})
+	}
+}
+
+func TestCommand_Action(t *testing.T) {
+	var ran []string
+	record := func(name string) CommandAction {
+		return func(c *Command) *Error {
+			ran = append(ran, name)
+			return nil
+		}
+	}
+	newApp := func() *Command {
+		ran = nil
+		return &Command{
+			Name:   "app",
+			Action: record("app"),
+			Commands: []*Command{
+				{Name: "serve", Action: record("serve")},
+				{Name: "build", Action: record("build")},
+				{Name: "noop"},
+			},
+		}
+	}
+
+	t.Run("only the selected subcommand runs", func(t *testing.T) {
+		if err := newApp().Parse([]string{"build"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if !slices.Equal(ran, []string{"build"}) {
+			t.Errorf("ran = %v, want [build]", ran)
+		}
+	})
+
+	t.Run("a subcommand without Action is fine", func(t *testing.T) {
+		if err := newApp().Parse([]string{"noop"}); err != nil || len(ran) != 0 {
+			t.Errorf("Parse() = %v, ran = %v; want nil, none", err, ran)
+		}
+	})
+
+	t.Run("a Command without Commands runs its own", func(t *testing.T) {
+		app := &Command{Name: "app", Action: record("app")}
+		ran = nil
+		if err := app.Parse(nil); err != nil || !slices.Equal(ran, []string{"app"}) {
+			t.Errorf("Parse() = %v, ran = %v; want nil, [app]", err, ran)
+		}
+	})
+
+	t.Run("it does not run when parsing fails", func(t *testing.T) {
+		app := newApp()
+		app.Stderr = io.Discard
+		app.Commands[0].Stderr = io.Discard
+		if err := app.Parse([]string{"serve", "--bogus"}); err == nil || len(ran) != 0 {
+			t.Errorf("Parse() = %v, ran = %v; want an error, none", err, ran)
+		}
+	})
+
+	t.Run("its error is what Parse returns", func(t *testing.T) {
+		want := newError(3, "boom")
+		app := newApp()
+		app.Commands[0].Action = func(c *Command) *Error { return want }
+		if err := app.Parse([]string{"serve"}); err != want {
+			t.Errorf("Parse() = %v, want %v", err, want)
+		}
+	})
+}
+
+func TestHelpString_Commands(t *testing.T) {
+	app := &Command{
+		Name:        "app",
+		Description: "My app",
+		Commands:    []*Command{{Name: "serve", Description: "Run the server"}, {Name: "build", Description: "Build it"}},
+	}
+	want := strings.Join([]string{
+		"Usage: app [options] <command> [args]",
+		"",
+		"My app",
+		"",
+		"Options:",
+		"  -h, --help   Print help",
+		"",
+		"Commands:",
+		"  serve        Run the server",
+		"  build        Build it",
+		"",
+	}, "\n")
+	if got := app.HelpString(); got != want {
+		t.Errorf("HelpString() =\n%s\nwant\n%s", got, want)
+	}
+}

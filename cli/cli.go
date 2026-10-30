@@ -67,6 +67,17 @@ type Command struct {
 	// first, then Options', then EnvVars, in that order.
 	EnvVars []EnvVar
 
+	// Commands are the program's subcommands. The first non-dash token
+	// selects one by Name and the tokens after it are parsed by that
+	// Command alone, so each declares its own items. Options before it
+	// belong to this Command. Not allowed together with Arguments.
+	Commands []*Command
+
+	// Action, if set, runs at the end of a successful Parse when this
+	// Command is the one selected: a subcommand, or a Command without
+	// Commands. A non-nil *Error it returns is what Parse returns.
+	Action CommandAction
+
 	// Stdout is where PrintUsage, PrintHelp, PrintVersion, and standalone
 	// help/version output write to. Defaults to os.Stdout when nil.
 	Stdout io.Writer
@@ -75,10 +86,16 @@ type Command struct {
 	// error) writes to, always, independent of Stdout. Defaults to
 	// os.Stderr when nil.
 	Stderr io.Writer
+
+	parent *Command
 }
 
 // Program is an alias for Command.
 type Program = Command
+
+// CommandAction runs when its Command is selected and parsed: c is that
+// Command, with every item resolved.
+type CommandAction func(c *Command) *Error
 
 // stdout returns the Command's standard output stream, defaulting to
 // os.Stdout when Stdout is nil. Used by PrintUsage, PrintHelp, and
@@ -264,6 +281,20 @@ func (c *Command) Validate() *Error {
 	// Command.Name is required: usage, help, and version output use it.
 	if c.Name == "" {
 		return newError(1, "cli: Command.Name must not be empty")
+	}
+
+	if len(c.Commands) > 0 && len(c.Arguments) > 0 {
+		return newError(1, "cli: Command %q declares both Arguments and Commands", c.Name)
+	}
+	cmds := make(map[string]bool, len(c.Commands))
+	for _, sub := range c.Commands {
+		if err := sub.Validate(); err != nil {
+			return err
+		}
+		if cmds[sub.Name] {
+			return newError(1, "cli: duplicate subcommand %q", sub.Name)
+		}
+		cmds[sub.Name] = true
 	}
 
 	// One pass over every item, built-ins included: its own structure,
@@ -465,6 +496,20 @@ func (c *Command) Parse(args []string) *Error {
 			}
 
 		default:
+			// With Commands, this token names the subcommand: resolve this
+			// Command's items, then hand over the rest.
+			if len(c.Commands) > 0 {
+				idx := slices.IndexFunc(c.Commands, func(s *Command) bool { return s.Name == tok })
+				if idx < 0 {
+					return c.PrintErrorf("unknown command %q", tok)
+				}
+				if err := c.resolve(seen); err != nil {
+					return err
+				}
+				c.Commands[idx].parent = c
+				return c.Commands[idx].Parse(args[i+1:])
+			}
+
 			// A non-dash token fills the next declared Argument, in
 			// declaration order.
 			if argIndex >= len(c.Arguments) {
@@ -480,11 +525,26 @@ func (c *Command) Parse(args []string) *Error {
 		}
 	}
 
-	// Everything the command line did not set falls back to its Env
-	// variable, else its Default -- Arguments, then Options, then
-	// standalone EnvVars, each in declaration order. Nothing above wrote
-	// a Default or Env value, so a failure in the loop leaves every
-	// untouched Dest exactly as the caller had it.
+	if err := c.resolve(seen); err != nil {
+		return err
+	}
+
+	if len(c.Commands) > 0 {
+		return c.PrintErrorf("a command is required")
+	}
+
+	if c.Action != nil {
+		return c.Action(c)
+	}
+	return nil
+}
+
+// resolve gives everything the command line did not set (not in seen)
+// its Env variable, else its Default -- Arguments, then Options, then
+// standalone EnvVars, each in declaration order. Nothing before it wrote
+// a Default or Env value, so a failure leaves every untouched Dest
+// exactly as the caller had it.
+func (c *Command) resolve(seen map[item]bool) *Error {
 	for it := range c.items(declaredOnly) {
 		if seen[it] {
 			continue
@@ -509,7 +569,6 @@ func (c *Command) Parse(args []string) *Error {
 		}
 		it.SetDefault()
 	}
-
 	return nil
 }
 
@@ -575,8 +634,7 @@ func (c *Command) ErrorString(err error) string {
 // format/args here and catch a mismatched verb.
 //
 // A caller holding a plain error can pass it through with "%s", err. A
-// user-declared Option's Action is such a caller; see the Action doc
-// comment.
+// user-declared Option's Action is such a caller; see OptionAction.
 func (c *Command) PrintErrorf(format string, args ...any) *Error {
 	err := fmt.Errorf(format, args...)
 	fmt.Fprint(c.stderr(), c.ErrorString(err))
@@ -604,7 +662,16 @@ func (c *Command) UsageString() string {
 	}
 
 	// The usage line is always "Usage: <program name> [options] arg1 [arg2] ..."
-	return fmt.Sprintf("Usage: %s [options]%s\n", c.Name, args.String())
+	if len(c.Commands) > 0 {
+		args.WriteString(" <command> [args]")
+	}
+
+	// Full name from the root down, e.g. "couch setup env".
+	path := c.Name
+	for p := c.parent; p != nil; p = p.parent {
+		path = p.Name + " " + path
+	}
+	return fmt.Sprintf("Usage: %s [options]%s\n", path, args.String())
 }
 
 // PrintUsage writes UsageString (the one-line usage summary) to c.Stdout
@@ -643,6 +710,9 @@ func (c *Command) HelpString() string {
 		if w := len(arg.GetName()); w > widthArgs {
 			widthArgs = w
 		}
+	}
+	for _, sub := range c.Commands {
+		widthArgs = max(widthArgs, len(sub.Name))
 	}
 	for opt := range c.options() {
 		if w := len(optionLabel(opt)) + 4; w > widthOpts { // 4 = len("-x, ")
@@ -688,6 +758,13 @@ func (c *Command) HelpString() string {
 			"  %-3s %-*s   %s\n",
 			flag, width-4, optionLabel(opt), describe(opt), // 4 = len("-x, ")
 		)
+	}
+
+	if len(c.Commands) > 0 {
+		fmt.Fprintf(&b, "\nCommands:\n")
+		for _, sub := range c.Commands {
+			fmt.Fprintf(&b, "  %-*s   %s\n", width, sub.Name, sub.Description)
+		}
 	}
 
 	// Environment Variables section, only render it if we actually found at least
