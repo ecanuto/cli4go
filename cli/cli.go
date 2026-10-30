@@ -77,7 +77,7 @@ type Command struct {
 	Stderr io.Writer
 }
 
-// Program is an alias for Command -- see the Command doc comment.
+// Program is an alias for Command.
 type Program = Command
 
 // stdout returns the Command's standard output stream, defaulting to
