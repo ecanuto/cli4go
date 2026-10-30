@@ -36,16 +36,22 @@ type EnvVar interface {
 	// environment variable is not set.
 	GetRequired() bool
 
-	// Set parses s into Dest, the value of the environment variable. It
-	// returns whatever conversion error the concrete type produces (none
-	// for a string), and does nothing -- returning nil -- when Dest is
-	// unset.
+	// GetValue returns the value of the environment variable, as a plain
+	// value (a string, an int, ...): the environment's, else Default.
+	// Before Parse it is the zero value of its type. It does not depend on
+	// Dest, which receives the same value.
+	GetValue() any
+
+	// Set parses s and stores the result as this EnvVar's value, and in
+	// Dest too when it is set. s is the value of the environment
+	// variable. It returns whatever conversion error the concrete type
+	// produces (none for a string).
 	Set(s string) error
 
-	// SetDefault assigns Default to Dest directly, when Dest is set, for
-	// when the environment variable is not set. It can never fail, since
-	// Default and Dest are the same Go type. The zero value applies too,
-	// like any other Default.
+	// SetDefault stores Default as this EnvVar's value, and in Dest too
+	// when it is set, for when the environment variable is not set. It can
+	// never fail, since Default and Dest are the same Go type. The zero
+	// value applies too, like any other Default.
 	SetDefault()
 
 	// Validate reports a structural problem with this EnvVar on its own,
@@ -69,9 +75,8 @@ type EnvVarOf[T any, P Parser[T]] struct {
 	Help string
 
 	// Dest binds the resolved value directly to a variable, e.g.
-	// &cfg.Debug. Optional -- an EnvVarOf with no Dest is purely
-	// informational, shown in help but not resolved into anything (the
-	// consuming application reads it itself, e.g. via os.Getenv).
+	// &cfg.Debug. Optional -- without it the value is still available
+	// through GetValue and Command.Lookup.
 	Dest *T
 
 	// Default is assigned to Dest when the environment variable is not
@@ -84,6 +89,10 @@ type EnvVarOf[T any, P Parser[T]] struct {
 	// with a non-zero Default; not validated, since Default would just be
 	// dead code, not a bug.
 	Required bool
+
+	// value is the item's own copy of the resolved value, which is what
+	// GetValue returns. Dest, when set, receives the same value.
+	value T
 }
 
 func (e *EnvVarOf[T, P]) GetName() string    { return e.Name }
@@ -91,8 +100,9 @@ func (e *EnvVarOf[T, P]) GetHelp() string    { return e.Help }
 func (e *EnvVarOf[T, P]) GetEnv() string     { return e.Name }
 func (e *EnvVarOf[T, P]) GetDefault() any    { return e.Default }
 func (e *EnvVarOf[T, P]) GetRequired() bool  { return e.Required }
-func (e *EnvVarOf[T, P]) Set(s string) error { return setDest(e.Dest, s, parseWith[T, P]) }
-func (e *EnvVarOf[T, P]) SetDefault()        { setDestDefault(e.Dest, e.Default) }
+func (e *EnvVarOf[T, P]) GetValue() any      { return e.value }
+func (e *EnvVarOf[T, P]) Set(s string) error { return setValue(&e.value, e.Dest, s, parseWith[T, P]) }
+func (e *EnvVarOf[T, P]) SetDefault()        { setValueDefault(&e.value, e.Dest, e.Default) }
 
 // Validate requires a name, since the name is the environment variable
 // itself.

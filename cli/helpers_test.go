@@ -66,36 +66,41 @@ func TestBoolParser(t *testing.T) {
 	}
 }
 
-func TestSetDest(t *testing.T) {
+func TestSetValue(t *testing.T) {
 	parse := func(s string) (int, error) { return intParser{}.Parse(s) }
 
 	tests := []struct {
-		name    string
-		dest    *int
-		input   string
-		want    int
-		wantErr bool
+		name     string
+		dest     *int
+		input    string
+		want     int
+		wantDest int
+		wantErr  bool
 	}{
-		{name: "stores the converted value", dest: new(int), input: "42", want: 42},
-		{name: "nil dest is a no-op", dest: nil, input: "42"},
-		{name: "nil dest skips conversion errors", dest: nil, input: "abc"},
-		{name: "conversion error leaves dest alone", dest: ptr(7), input: "abc", want: 7, wantErr: true},
+		{name: "stores in val and dest", dest: ptr(1), input: "42", want: 42, wantDest: 42},
+		{name: "nil dest still stores in val", dest: nil, input: "42", want: 42},
+		{name: "nil dest still reports conversion errors", dest: nil, input: "abc", want: 5, wantErr: true},
+		{name: "conversion error leaves both alone", dest: ptr(7), input: "abc", want: 5, wantDest: 7, wantErr: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := setDest(tt.dest, tt.input, parse)
+			val := 5
+			err := setValue(&val, tt.dest, tt.input, parse)
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("setDest() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("setValue() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.dest != nil && *tt.dest != tt.want {
-				t.Errorf("*dest = %d, want %d", *tt.dest, tt.want)
+			if val != tt.want {
+				t.Errorf("val = %d, want %d", val, tt.want)
+			}
+			if tt.dest != nil && *tt.dest != tt.wantDest {
+				t.Errorf("*dest = %d, want %d", *tt.dest, tt.wantDest)
 			}
 		})
 	}
 }
 
-func TestSetDestDefault(t *testing.T) {
+func TestSetValueDefault(t *testing.T) {
 	tests := []struct {
 		name string
 		dest *string
@@ -104,12 +109,16 @@ func TestSetDestDefault(t *testing.T) {
 	}{
 		{name: "stores the default", dest: ptr("old"), def: "new", want: "new"},
 		{name: "stores the zero value", dest: ptr("old"), def: "", want: ""},
-		{name: "nil dest is a no-op", dest: nil, def: "new"},
+		{name: "nil dest still stores in val", dest: nil, def: "new", want: "new"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setDestDefault(tt.dest, tt.def)
+			val := "old"
+			setValueDefault(&val, tt.dest, tt.def)
+			if val != tt.want {
+				t.Errorf("val = %q, want %q", val, tt.want)
+			}
 			if tt.dest != nil && *tt.dest != tt.want {
 				t.Errorf("*dest = %q, want %q", *tt.dest, tt.want)
 			}

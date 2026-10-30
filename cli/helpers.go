@@ -50,26 +50,27 @@ func parseWith[T any, P Parser[T]](s string) (T, error) {
 	return p.Parse(s)
 }
 
-// setDest converts s with parse and stores the result in dest, doing
-// nothing -- and returning nil -- when dest is unset. It is the base
-// behavior behind every item's Set method: only parse differs
-// from one type to the next. On a conversion error dest is left alone.
-func setDest[T any](dest *T, s string, parse func(string) (T, error)) error {
-	if dest == nil {
-		return nil
-	}
+// setValue converts s with parse and stores the result in val, the
+// item's own copy, and in dest too when dest is set. It is the base
+// behavior behind every item's Set method: only parse differs from one
+// type to the next. On a conversion error neither is touched.
+func setValue[T any](val, dest *T, s string, parse func(string) (T, error)) error {
 	v, err := parse(s)
 	if err != nil {
 		return err
 	}
-	*dest = v
+	*val = v
+	if dest != nil {
+		*dest = v
+	}
 	return nil
 }
 
-// setDestDefault stores def in dest, when dest is set. It is the base
-// behavior behind every item's SetDefault method: def and dest
+// setValueDefault stores def in val and in dest, when dest is set. It is
+// the base behavior behind every item's SetDefault method: def and dest
 // are the same Go type, so it can never fail.
-func setDestDefault[T any](dest *T, def T) {
+func setValueDefault[T any](val, dest *T, def T) {
+	*val = def
 	if dest != nil {
 		*dest = def
 	}

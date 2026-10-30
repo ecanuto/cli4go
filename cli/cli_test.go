@@ -12,9 +12,8 @@ import (
 
 // TestSet covers every typed Argument/Option's set: it converts the
 // string into Dest's Go type, returns the conversion error unchanged
-// for a bad one (leaving Dest as it was), and does nothing at all --
-// returning nil, even for input that wouldn't parse -- when Dest is
-// unset.
+// for a bad one (leaving Dest as it was), and keeps the value in the
+// item itself (GetValue) whether or not Dest is set.
 func TestSet(t *testing.T) {
 	t.Run("stores into Dest", func(t *testing.T) {
 		var s1, s2 string
@@ -68,21 +67,41 @@ func TestSet(t *testing.T) {
 		}
 	})
 
-	t.Run("a nil Dest is a no-op", func(t *testing.T) {
+	t.Run("a nil Dest still stores the value in the item", func(t *testing.T) {
 		tests := []struct {
 			name string
-			set  func(string) error
+			it   item
+			in   string
+			want any
 		}{
-			{"StringArgument", (&StringArgument{}).Set},
-			{"StringOption", (&StringOption{Flag: "-s"}).Set},
-			{"IntArgument", (&IntArgument{}).Set},
-			{"IntOption", (&IntOption{Flag: "-i"}).Set},
-			{"BoolOption", (&BoolOption{Flag: "-b"}).Set},
+			{"StringArgument", &StringArgument{}, "x", "x"},
+			{"StringOption", &StringOption{Flag: "-s"}, "y", "y"},
+			{"IntArgument", &IntArgument{}, "42", 42},
+			{"IntOption", &IntOption{Flag: "-i"}, "-7", -7},
+			{"BoolOption", &BoolOption{Flag: "-b"}, "true", true},
+			{"StringEnvVar", &StringEnvVar{Name: "APP_X"}, "z", "z"},
 		}
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				if err := tt.set("nope"); err != nil {
-					t.Errorf("set() = %v, want nil", err)
+				if err := tt.it.Set(tt.in); err != nil {
+					t.Fatalf("Set(%q) = %v, want nil", tt.in, err)
+				}
+				if got := tt.it.GetValue(); got != tt.want {
+					t.Errorf("GetValue() = %#v, want %#v", got, tt.want)
+				}
+			})
+		}
+	})
+
+	t.Run("a nil Dest still reports a conversion error", func(t *testing.T) {
+		for name, it := range map[string]item{
+			"IntArgument": &IntArgument{},
+			"IntOption":   &IntOption{Flag: "-i"},
+			"BoolOption":  &BoolOption{Flag: "-b"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				if err := it.Set("nope"); err == nil {
+					t.Error("Set(\"nope\") = nil, want a conversion error")
 				}
 			})
 		}
@@ -2554,4 +2573,76 @@ func TestParse_ArgumentDefault(t *testing.T) {
 	if s != "d" || n != 7 {
 		t.Errorf("Dests = %q, %d; want %q, %d", s, n, "d", 7)
 	}
+}
+
+func TestLookup(t *testing.T) {
+	newCmd := func() *Command {
+		return &Command{
+			Name:      "app",
+			Arguments: []Argument{&StringArgument{Name: "qux"}},
+			Options: []Option{
+				&StringOption{Long: "--bar", Default: "def"},
+				&IntOption{Flag: "-n", Name: "count", Env: "APP_COUNT"},
+				&BoolOption{Flag: "-f", Long: "--foo"},
+			},
+			EnvVars: []EnvVar{&StringEnvVar{Name: "APP_TOKEN"}},
+			Stdout:  io.Discard,
+			Stderr:  io.Discard,
+		}
+	}
+
+	t.Run("values resolved by Parse, with no Dest", func(t *testing.T) {
+		t.Setenv("APP_COUNT", "3")
+		t.Setenv("APP_TOKEN", "secret")
+		c := newCmd()
+		if err := c.Parse([]string{"-f", "thing"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		want := map[string]any{
+			"qux":       "thing",
+			"bar":       "def",
+			"count":     3,
+			"foo":       true,
+			"APP_TOKEN": "secret",
+		}
+		for name, w := range want {
+			got, ok := c.Lookup(name)
+			if !ok || got != w {
+				t.Errorf("Lookup(%q) = %#v, %v; want %#v, true", name, got, ok, w)
+			}
+		}
+	})
+
+	t.Run("the command line wins and Dest gets the same value", func(t *testing.T) {
+		var bar string
+		c := newCmd()
+		c.Options[0].(*StringOption).Dest = &bar
+		if err := c.Parse([]string{"--bar=cli", "thing"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		got, ok := c.Lookup("bar")
+		if !ok || got != "cli" || bar != "cli" {
+			t.Errorf("Lookup(\"bar\") = %#v, %v, Dest = %q; want \"cli\", true, \"cli\"", got, ok, bar)
+		}
+	})
+
+	t.Run("before Parse it is the zero value", func(t *testing.T) {
+		got, ok := newCmd().Lookup("count")
+		if !ok || got != 0 {
+			t.Errorf("Lookup(\"count\") = %#v, %v; want 0, true", got, ok)
+		}
+	})
+
+	t.Run("an unknown name", func(t *testing.T) {
+		got, ok := newCmd().Lookup("nope")
+		if ok || got != nil {
+			t.Errorf("Lookup(\"nope\") = %#v, %v; want nil, false", got, ok)
+		}
+	})
+
+	t.Run("the built-ins are not declared", func(t *testing.T) {
+		if _, ok := newCmd().Lookup("help"); ok {
+			t.Error("Lookup(\"help\") found the built-in -h/--help")
+		}
+	})
 }

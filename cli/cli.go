@@ -31,6 +31,7 @@ type item interface {
 	GetEnv() string
 	GetDefault() any
 	GetRequired() bool
+	GetValue() any
 	Set(s string) error
 	SetDefault()
 	Validate() error
@@ -515,6 +516,22 @@ func (c *Command) Parse(args []string) *Error {
 	}
 
 	return nil
+}
+
+// Lookup returns the value of the Argument, Option, or EnvVar whose
+// GetName is name, as a plain value (a string, an int, ...), and whether
+// such an item is declared. The value is the one Parse resolved: from the
+// command line, else from the environment, else Default; before Parse it
+// is the zero value of the item's type. It works with or without Dest.
+// The built-in -h/--help and -v/--version Options are not declared by the
+// caller and are not found.
+func (c *Command) Lookup(name string) (any, bool) {
+	for it := range c.items(declaredOnly) {
+		if it.GetName() == name {
+			return it.GetValue(), true
+		}
+	}
+	return nil, false
 }
 
 // DefaultParse is a convenience wrapper around Parse that reads

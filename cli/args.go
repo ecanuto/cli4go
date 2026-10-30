@@ -44,16 +44,22 @@ type Argument interface {
 	// neither the command line nor GetEnv's variable sets this Argument.
 	GetRequired() bool
 
-	// Set parses s into Dest, the token Parse (or an Env lookup) just
-	// resolved for this Argument. It returns whatever conversion error the
-	// concrete type produces (none for a string), and does nothing --
-	// returning nil -- when Dest is unset.
+	// GetValue returns the value this Argument resolved, as a plain value
+	// (a string, an int, ...): from the command line, else from the
+	// environment, else Default. Before Parse it is the zero value of its
+	// type. It does not depend on Dest, which receives the same value.
+	GetValue() any
+
+	// Set parses s and stores the result as this Argument's value, and in
+	// Dest too when it is set. The token is the one Parse (or an Env
+	// lookup) just resolved. It returns whatever conversion error the
+	// concrete type produces (none for a string).
 	Set(s string) error
 
-	// SetDefault assigns Default to Dest directly, when Dest is set -- no
-	// string round trip, and it can never fail, since Default and Dest are
-	// the same Go type. The zero value applies too, like any other Default
-	// (see StringArgument's Default doc comment).
+	// SetDefault stores Default as this Argument's value, and in Dest too
+	// when it is set -- no string round trip, and it can never fail, since
+	// Default and Dest are the same Go type. The zero value applies too,
+	// like any other Default (see StringArgument's Default doc comment).
 	SetDefault()
 
 	// Validate reports a structural problem with this Argument on its own,
@@ -80,7 +86,8 @@ type ArgumentOf[T any, P Parser[T]] struct {
 	Help string
 
 	// Dest binds the parsed value directly to a variable, e.g.
-	// &cfg.Qux. Optional.
+	// &cfg.Qux. Optional -- without it the value is still available
+	// through GetValue and Command.Lookup.
 	Dest *T
 
 	// Default is assigned to Dest when neither the command line nor Env
@@ -97,6 +104,10 @@ type ArgumentOf[T any, P Parser[T]] struct {
 	// Env. Not meant to be combined with a non-zero Default; not
 	// validated, since Default would just be dead code, not a bug.
 	Required bool
+
+	// value is the item's own copy of the resolved value, which is what
+	// GetValue returns. Dest, when set, receives the same value.
+	value T
 }
 
 func (a *ArgumentOf[T, P]) GetName() string    { return a.Name }
@@ -104,8 +115,9 @@ func (a *ArgumentOf[T, P]) GetHelp() string    { return a.Help }
 func (a *ArgumentOf[T, P]) GetEnv() string     { return a.Env }
 func (a *ArgumentOf[T, P]) GetDefault() any    { return a.Default }
 func (a *ArgumentOf[T, P]) GetRequired() bool  { return a.Required }
-func (a *ArgumentOf[T, P]) Set(s string) error { return setDest(a.Dest, s, parseWith[T, P]) }
-func (a *ArgumentOf[T, P]) SetDefault()        { setDestDefault(a.Dest, a.Default) }
+func (a *ArgumentOf[T, P]) GetValue() any      { return a.value }
+func (a *ArgumentOf[T, P]) Set(s string) error { return setValue(&a.value, a.Dest, s, parseWith[T, P]) }
+func (a *ArgumentOf[T, P]) SetDefault()        { setValueDefault(&a.value, a.Dest, a.Default) }
 
 // Validate requires a display name, which shows in the usage line and
 // the "Arguments:" help section.

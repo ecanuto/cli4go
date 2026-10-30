@@ -53,15 +53,22 @@ type Option interface {
 	// neither the command line nor GetEnv's variable sets this Option.
 	GetRequired() bool
 
-	// Set parses s into Dest, the token Parse (or an Env lookup) just
-	// resolved for this Option. It returns whatever conversion error the
-	// concrete type produces, and does nothing -- returning nil -- when
-	// Dest is unset.
+	// GetValue returns the value this Option resolved, as a plain value
+	// (a string, an int, ...): from the command line, else from the
+	// environment, else Default. Before Parse it is the zero value of its
+	// type. It does not depend on Dest, which receives the same value.
+	GetValue() any
+
+	// Set parses s and stores the result as this Option's value, and in
+	// Dest too when it is set. The token is the one Parse (or an Env
+	// lookup) just resolved. It returns whatever conversion error the
+	// concrete type produces.
 	Set(s string) error
 
-	// SetDefault assigns Default to Dest directly, when Dest is set -- no
-	// string round trip, and it can never fail, since Default and Dest are
-	// the same Go type. The zero value applies too, like any other Default.
+	// SetDefault stores Default as this Option's value, and in Dest too
+	// when it is set -- no string round trip, and it can never fail, since
+	// Default and Dest are the same Go type. The zero value applies too,
+	// like any other Default.
 	SetDefault()
 
 	// Validate reports a structural problem with this Option on its own,
@@ -127,8 +134,9 @@ type OptionOf[T any, P Parser[T]] struct {
 	Help string
 
 	// Dest binds the parsed value directly to a variable, e.g.
-	// &cfg.Bar. Optional. May be combined with Action -- see the Action
-	// doc comment for the exact resolution order.
+	// &cfg.Bar. Optional -- without it the value is still available
+	// through GetValue and Command.Lookup. May be combined with Action --
+	// see the Action doc comment for the exact resolution order.
 	Dest *T
 
 	// Default is assigned to Dest when neither the command line nor Env
@@ -150,6 +158,10 @@ type OptionOf[T any, P Parser[T]] struct {
 	// Env. Not meant to be combined with a non-zero Default; not
 	// validated, since Default would just be dead code, not a bug.
 	Required bool
+
+	// value is the item's own copy of the resolved value, which is what
+	// GetValue returns. Dest, when set, receives the same value.
+	value T
 }
 
 func (o *OptionOf[T, P]) GetName() string    { return optionName(o.Name, o.GetFlag(), o.GetLong()) }
@@ -160,8 +172,9 @@ func (o *OptionOf[T, P]) GetEnv() string     { return o.Env }
 func (o *OptionOf[T, P]) GetDefault() any    { return o.Default }
 func (o *OptionOf[T, P]) GetAction() Action  { return o.Action }
 func (o *OptionOf[T, P]) GetRequired() bool  { return o.Required }
-func (o *OptionOf[T, P]) Set(s string) error { return setDest(o.Dest, s, parseWith[T, P]) }
-func (o *OptionOf[T, P]) SetDefault()        { setDestDefault(o.Dest, o.Default) }
+func (o *OptionOf[T, P]) GetValue() any      { return o.value }
+func (o *OptionOf[T, P]) Set(s string) error { return setValue(&o.value, o.Dest, s, parseWith[T, P]) }
+func (o *OptionOf[T, P]) SetDefault()        { setValueDefault(&o.value, o.Dest, o.Default) }
 
 // Validate checks the normalized flag and long forms.
 func (o *OptionOf[T, P]) Validate() error {
