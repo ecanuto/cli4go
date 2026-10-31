@@ -2528,7 +2528,7 @@ func TestParse_Required(t *testing.T) {
 func TestSetDefault(t *testing.T) {
 	t.Run("assigns Default to Dest", func(t *testing.T) {
 		s1, s2, i1, i2, b := "old", "old", 1, 1, true
-		items := []interface{ SetDefault() }{
+		items := []interface{ SetDefault() error }{
 			&StringArgument{Dest: &s1, Default: "new"},
 			&StringOption{Flag: "-s", Dest: &s2, Default: "new"},
 			&IntArgument{Dest: &i1, Default: 7},
@@ -2544,7 +2544,7 @@ func TestSetDefault(t *testing.T) {
 	})
 
 	t.Run("a nil Dest is a no-op", func(t *testing.T) {
-		items := []interface{ SetDefault() }{
+		items := []interface{ SetDefault() error }{
 			&StringArgument{Default: "x"},
 			&StringOption{Flag: "-s", Default: "x"},
 			&IntArgument{Default: 1},
@@ -2833,4 +2833,43 @@ func TestHelpString_Commands(t *testing.T) {
 	if got := app.HelpString(); got != want {
 		t.Errorf("HelpString() =\n%s\nwant\n%s", got, want)
 	}
+}
+
+// failingDefaultOption is an Option implemented outside OptionOf whose
+// default can fail, the case SetDefault's error exists for.
+type failingDefaultOption struct {
+	*StringOption
+	err error
+}
+
+func (o *failingDefaultOption) SetDefault() error {
+	return o.err
+}
+
+func TestParse_OptionSetDefaultError(t *testing.T) {
+	newCmd := func(err error) *Command {
+		return &Command{
+			Name:   "myprogram",
+			Stderr: io.Discard,
+			Options: []Option{
+				&failingDefaultOption{StringOption: &StringOption{Long: "--site"}, err: err},
+			},
+		}
+	}
+
+	t.Run("a failing default is a usage error naming the option", func(t *testing.T) {
+		err := newCmd(errors.New("no site")).Parse(nil)
+		if err == nil || err.ExitCode() != 2 {
+			t.Fatalf("Parse() = %v, want a usage error", err)
+		}
+		if !strings.Contains(err.Error(), "site") || !strings.Contains(err.Error(), "no site") {
+			t.Errorf("Parse().Error() = %q, want it to name the option and the cause", err.Error())
+		}
+	})
+
+	t.Run("not consulted when the flag is set", func(t *testing.T) {
+		if err := newCmd(errors.New("no site")).Parse([]string{"--site", "a"}); err != nil {
+			t.Errorf("Parse() = %v, want nil", err)
+		}
+	})
 }

@@ -33,7 +33,7 @@ type item interface {
 	GetRequired() bool
 	GetValue() any
 	Set(s string) error
-	SetDefault()
+	SetDefault() error
 	Validate() error
 }
 
@@ -567,7 +567,9 @@ func (c *Command) resolve(seen map[item]bool) *Error {
 		if it.GetRequired() {
 			return c.PrintErrorf("%q is required", it.GetName())
 		}
-		it.SetDefault()
+		if err := it.SetDefault(); err != nil {
+			return c.PrintErrorf("default value for %q: %w", it.GetName(), err)
+		}
 	}
 	return nil
 }

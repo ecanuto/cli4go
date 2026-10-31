@@ -57,10 +57,12 @@ type Argument interface {
 	Set(s string) error
 
 	// SetDefault stores Default as this Argument's value, and in Dest too
-	// when it is set -- no string round trip, and it can never fail, since
-	// Default and Dest are the same Go type. The zero value applies too,
-	// like any other Default (see StringArgument's Default doc comment).
-	SetDefault()
+	// when it is set -- no string round trip. ArgumentOf never fails
+	// here, since Default and Dest are the same Go type; the error is only
+	// for an implementation outside this package, as for Option. The zero
+	// value applies too, like any other Default (see StringArgument's
+	// Default doc comment).
+	SetDefault() error
 
 	// Validate reports a structural problem with this Argument on its own,
 	// independent of any other item -- an empty Name, for instance.
@@ -117,7 +119,11 @@ func (a *ArgumentOf[T, P]) GetDefault() any    { return a.Default }
 func (a *ArgumentOf[T, P]) GetRequired() bool  { return a.Required }
 func (a *ArgumentOf[T, P]) GetValue() any      { return a.value }
 func (a *ArgumentOf[T, P]) Set(s string) error { return setValue(&a.value, a.Dest, s, parseWith[T, P]) }
-func (a *ArgumentOf[T, P]) SetDefault()        { setValueDefault(&a.value, a.Dest, a.Default) }
+
+func (a *ArgumentOf[T, P]) SetDefault() error {
+	setValueDefault(&a.value, a.Dest, a.Default)
+	return nil
+}
 
 // Validate requires a display name, which shows in the usage line and
 // the "Arguments:" help section.

@@ -66,10 +66,13 @@ type Option interface {
 	Set(s string) error
 
 	// SetDefault stores Default as this Option's value, and in Dest too
-	// when it is set -- no string round trip, and it can never fail, since
-	// Default and Dest are the same Go type. The zero value applies too,
-	// like any other Default.
-	SetDefault()
+	// when it is set -- no string round trip. The zero value applies too,
+	// like any other Default. OptionOf never fails here, since Default and
+	// Dest are the same Go type; the error is for an Option implemented
+	// outside this package whose default can fail (e.g. one that depends
+	// on the file system), which Parse reports as a usage error that names
+	// the Option.
+	SetDefault() error
 
 	// Validate reports a structural problem with this Option on its own,
 	// independent of any other item -- a missing Flag/Long, for instance.
@@ -174,7 +177,13 @@ func (o *OptionOf[T, P]) GetAction() OptionAction { return o.Action }
 func (o *OptionOf[T, P]) GetRequired() bool       { return o.Required }
 func (o *OptionOf[T, P]) GetValue() any           { return o.value }
 func (o *OptionOf[T, P]) Set(s string) error      { return setValue(&o.value, o.Dest, s, parseWith[T, P]) }
-func (o *OptionOf[T, P]) SetDefault()             { setValueDefault(&o.value, o.Dest, o.Default) }
+
+// SetDefault stores Default. It never fails: Default and Dest are the same
+// Go type, so there is no conversion to go wrong.
+func (o *OptionOf[T, P]) SetDefault() error {
+	setValueDefault(&o.value, o.Dest, o.Default)
+	return nil
+}
 
 // Validate checks the normalized flag and long forms.
 func (o *OptionOf[T, P]) Validate() error {

@@ -49,10 +49,11 @@ type EnvVar interface {
 	Set(s string) error
 
 	// SetDefault stores Default as this EnvVar's value, and in Dest too
-	// when it is set, for when the environment variable is not set. It can
-	// never fail, since Default and Dest are the same Go type. The zero
-	// value applies too, like any other Default.
-	SetDefault()
+	// when it is set, for when the environment variable is not set.
+	// EnvVarOf never fails here, since Default and Dest are the same Go
+	// type; the error is only for an implementation outside this package, as
+	// for Option. The zero value applies too, like any other Default.
+	SetDefault() error
 
 	// Validate reports a structural problem with this EnvVar on its own,
 	// independent of any other item -- an empty Name, for instance.
@@ -102,7 +103,13 @@ func (e *EnvVarOf[T, P]) GetDefault() any    { return e.Default }
 func (e *EnvVarOf[T, P]) GetRequired() bool  { return e.Required }
 func (e *EnvVarOf[T, P]) GetValue() any      { return e.value }
 func (e *EnvVarOf[T, P]) Set(s string) error { return setValue(&e.value, e.Dest, s, parseWith[T, P]) }
-func (e *EnvVarOf[T, P]) SetDefault()        { setValueDefault(&e.value, e.Dest, e.Default) }
+
+// SetDefault stores Default. It never fails: Default and Dest are the same
+// Go type, so there is no conversion to go wrong.
+func (e *EnvVarOf[T, P]) SetDefault() error {
+	setValueDefault(&e.value, e.Dest, e.Default)
+	return nil
+}
 
 // Validate requires a name, since the name is the environment variable
 // itself.
