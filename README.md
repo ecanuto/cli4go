@@ -186,12 +186,6 @@ keeping it out of `main()` is what makes it testable.
 `cli4go` is under active early development. The API is not stable yet
 and may change without notice until a `v1.0.0` is tagged.
 
-## Roadmap
-
-- [ ] Core parser (arguments, options, help/version generation)
-- [ ] Subcommands
-- [ ] Generate a `Program` from a YAML/JSON definition
-
 ## License
 
 MIT -- see [LICENSE](LICENSE).
