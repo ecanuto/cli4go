@@ -186,6 +186,13 @@ keeping it out of `main()` is what makes it testable.
 `cli4go` is under active early development. The API is not stable yet
 and may change without notice until a `v1.0.0` is tagged.
 
+## Known limitations
+
+- A `Command` that has `Commands` ignores its own `Action`.
+- No subcommand aliases.
+- No options inherited by subcommands.
+- No shell completion or man page generation yet.
+
 ## License
 
 MIT -- see [LICENSE](LICENSE).
