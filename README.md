@@ -14,6 +14,7 @@ fields, and call `Parse()`.
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -52,6 +53,9 @@ func main() {
 	}
 
 	if err := prg.DefaultParse(); err != nil {
+		if !errors.Is(err, cli.ErrExit) {
+			fmt.Fprintln(os.Stderr, "error:", err)
+		}
 		os.Exit(err.ExitCode())
 	}
 

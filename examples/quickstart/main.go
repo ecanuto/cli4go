@@ -4,6 +4,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 
@@ -49,10 +50,14 @@ func main() {
 		},
 	}
 
-	// DefaultParse parses os.Args, handles -h/--help and -v/--version, and
-	// prints any error itself; a non-nil return only means "stop, exit with
-	// this code".
+	// DefaultParse parses os.Args and handles -h/--help and -v/--version.
+	// A non-nil return means "stop, exit with this code". ErrExit marks the
+	// errors Parse already printed (help, version, usage errors); any other
+	// error is still ours to print.
 	if err := prg.DefaultParse(); err != nil {
+		if !errors.Is(err, cli.ErrExit) {
+			fmt.Fprintln(os.Stderr, "error:", err)
+		}
 		os.Exit(err.ExitCode())
 	}
 

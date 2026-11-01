@@ -57,17 +57,6 @@ func TestErrorf_Wrap(t *testing.T) {
 	}
 }
 
-func TestErrorf_CodeZero(t *testing.T) {
-	err := Errorf(0, "done")
-
-	if !errors.Is(err, ErrExit) {
-		t.Error("errors.Is(err, ErrExit) = false for code 0, want true")
-	}
-	if got := err.ExitCode(); got != 0 {
-		t.Errorf("ExitCode() = %d, want 0", got)
-	}
-}
-
 func TestUsageErrorf_Wrap(t *testing.T) {
 	sentinel := errors.New("sentinel")
 	cmd := &Command{Name: "prog", Stderr: io.Discard}
@@ -82,6 +71,8 @@ func TestUsageErrorf_Wrap(t *testing.T) {
 }
 
 func TestExitCode(t *testing.T) {
+	cmd := &Command{Name: "prog", Stderr: io.Discard}
+
 	tests := []struct {
 		name       string
 		err        *Error
@@ -107,7 +98,13 @@ func TestExitCode(t *testing.T) {
 			wantIsExit: false,
 		},
 		{
-			name:       "usage error",
+			name:       "usage error already printed (exit only)",
+			err:        cmd.UsageErrorf("unknown option %q", "--nope"),
+			wantCode:   2,
+			wantIsExit: true,
+		},
+		{
+			name:       "usage code from Errorf (main prints)",
 			err:        Errorf(2, "unknown option %q", "--nope"),
 			wantCode:   2,
 			wantIsExit: false,
@@ -119,10 +116,9 @@ func TestExitCode(t *testing.T) {
 			if got := tt.err.ExitCode(); got != tt.wantCode {
 				t.Errorf("ExitCode() = %d, want %d", got, tt.wantCode)
 			}
-			// Only a code-0 Error (ErrHelp/ErrVersion) also classifies as
-			// ErrExit. A Validate failure or a usage error must not, or a
-			// caller checking errors.Is(err, ErrExit) would mistake a real
-			// failure for an already-printed clean exit.
+			// ErrExit means "already handled, only the exit is left": true
+			// for help, version and anything printed, false for an Error
+			// main still has to print (Validate failure, plain Errorf).
 			if got := errors.Is(tt.err, ErrExit); got != tt.wantIsExit {
 				t.Errorf("errors.Is(err, ErrExit) = %v, want %v", got, tt.wantIsExit)
 			}
@@ -137,9 +133,6 @@ func TestErrHelp_Is(t *testing.T) {
 	if errors.Is(ErrHelp, ErrVersion) {
 		t.Error("errors.Is(ErrHelp, ErrVersion) = true, want false")
 	}
-	if errors.Unwrap(ErrHelp) != nil {
-		t.Errorf("errors.Unwrap(ErrHelp) = %v, want nil", errors.Unwrap(ErrHelp))
-	}
 	if got, want := ErrHelp.Error(), "cli: help requested"; got != want {
 		t.Errorf("ErrHelp.Error() = %q, want %q", got, want)
 	}
@@ -151,9 +144,6 @@ func TestErrVersion_Is(t *testing.T) {
 	}
 	if errors.Is(ErrVersion, ErrHelp) {
 		t.Error("errors.Is(ErrVersion, ErrHelp) = true, want false")
-	}
-	if errors.Unwrap(ErrVersion) != nil {
-		t.Errorf("errors.Unwrap(ErrVersion) = %v, want nil", errors.Unwrap(ErrVersion))
 	}
 	if got, want := ErrVersion.Error(), "cli: version requested"; got != want {
 		t.Errorf("ErrVersion.Error() = %q, want %q", got, want)

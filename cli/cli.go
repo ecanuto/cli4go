@@ -382,7 +382,7 @@ func (c *Command) Validate() *Error {
 //     that matters.
 //   - a code-1 failure (ExitCode() == 1): the Command itself was
 //     declared incorrectly, as reported by Validate(). Nothing is
-//     printed.
+//     printed, and errors.Is(err, ErrExit) is false: the caller prints it.
 //   - a real parsing/usage error (ExitCode() == 2): an unknown, invalid,
 //     repeated, or missing-but-Required option/argument, including a
 //     bad Env value, or whatever *Error a caller-declared Option's
@@ -390,7 +390,9 @@ func (c *Command) Validate() *Error {
 //     c.Stderr before returning (see below) for everything except an
 //     Action's own *Error, which Parse returns exactly as given -- an
 //     Action that wants that same clap-style block builds it itself via
-//     c.UsageErrorf.
+//     c.UsageErrorf. errors.Is(err, ErrExit) is true for what Parse
+//     printed, and false for an Action's *Error built with Errorf, which
+//     the caller prints.
 //
 // For a real parsing/usage error Parse builds itself, Parse prints (via
 // UsageErrorf -- see its doc comment):
@@ -602,9 +604,9 @@ func (c *Command) DefaultParse() *Error {
 
 // usageErrorString returns the clap-style error block for a real
 // parsing/usage error: the "error: <message>" line, the usage line (see
-// UsageString), and a pointer to '--help'. Parse uses it for every real
-// parsing/usage error (ExitCode() == 2); see the Parse doc comment for
-// the exact layout.
+// UsageString), and a pointer to '--help'. UsageErrorf prints it for every
+// real parsing/usage error (ExitCode() == 2); see the Parse doc comment
+// for the exact layout.
 //
 // err is the bare underlying error (e.g. fmt.Errorf("unknown option
 // %q", tok)). The "error: " prefix is display-only: the message stored
@@ -620,14 +622,17 @@ func (c *Command) usageErrorString(err error) string {
 }
 
 // UsageErrorf formats err per format/args -- exactly like fmt.Errorf,
-// including %w to wrap an underlying error -- writes usageErrorString of the
-// result to c.Stderr (os.Stderr by default), and returns the *Error the
-// caller should return in turn. Unlike PrintUsage/PrintHelp/
-// PrintVersion, which write to Stdout and return nothing, it writes to
-// Stderr and returns a value: formatting the error, printing the block,
-// and building the *Error are the same step at every call site, and
-// every block this package prints is a real parsing/usage error, so the
-// exit code is always 2 (see Error.ExitCode's doc comment).
+// including %w to wrap an underlying error -- writes the clap-style error
+// block for the result to c.Stderr (os.Stderr by default), and returns the
+// *Error the caller should return in turn. The returned Error satisfies
+// errors.Is(err, ErrExit): it has been printed, so only the exit is left.
+//
+// Unlike PrintUsage/PrintHelp/PrintVersion, which write to Stdout and
+// return nothing, it writes to Stderr and returns a value: formatting
+// the error, printing the block, and building the *Error are the same
+// step at every call site, and every block this package prints is a real
+// parsing/usage error, so the exit code is always 2 (see Error.ExitCode's
+// doc comment).
 //
 // The "f" suffix is what lets `go vet`'s printf checker recognize
 // format/args here and catch a mismatched verb.
@@ -638,7 +643,7 @@ func (c *Command) usageErrorString(err error) string {
 func (c *Command) UsageErrorf(format string, args ...any) *Error {
 	err := fmt.Errorf(format, args...)
 	fmt.Fprint(c.stderr(), c.usageErrorString(err))
-	return Errorf(2, "%w", err)
+	return newError(2, true, err)
 }
 
 // UsageString returns the one-line usage summary, e.g.
