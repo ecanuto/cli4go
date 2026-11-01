@@ -21,6 +21,14 @@ import (
 // also keeps its fields public for struct-literal construction. The Get prefix is what keeps field
 // and method from colliding -- a plain Flag() would clash with the Flag
 // field.
+//
+// Option can also be implemented outside this package, for an Option whose
+// behavior OptionOf cannot express (a fixed environment variable, a value
+// checked against the filesystem, ...). Parse treats such an Option as
+// taking a value: only a *BoolOption is recognized, by its type, as taking
+// none, so a custom Option never works as a bare flag, and the help shows
+// its value placeholder. SetDefault may return an error when a default
+// cannot be computed; Parse reports it as a usage error naming the Option.
 type Option interface {
 	// GetName returns the identifier of this Option: its Name when set,
 	// else its long form, else its flag form, without dashes.
