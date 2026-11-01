@@ -21,15 +21,30 @@ import (
 type Error struct {
 	msg  string
 	code int
+	err  error
 }
 
-// newError builds a dynamic-message Error for a given exit code (1 for a
-// Validate failure, 2 for a real parsing/usage error).
-func newError(code int, format string, args ...any) *Error {
-	return &Error{msg: fmt.Sprintf(format, args...), code: code}
+// Errorf builds an Error with the given exit code and a message
+// formatted like fmt.Errorf. It prints nothing: it is for a caller (for
+// example an Action) that wants to return its own failure, with its own
+// exit code, and decide for itself how to report it. To print the
+// clap-style block as well, use Command.PrintErrorf.
+//
+// A %w verb in format wraps an underlying error, which errors.Is and
+// errors.As then find through the returned Error. The code is not
+// validated: 0 makes errors.Is(err, ErrExit) true, which asks the caller
+// to exit successfully without any further output.
+func Errorf(code int, format string, args ...any) *Error {
+	err := fmt.Errorf(format, args...)
+	return &Error{msg: err.Error(), code: code, err: err}
 }
 
 func (e *Error) Error() string { return e.msg }
+
+// Unwrap returns the error built from Errorf's format, so errors.Is and
+// errors.As reach anything wrapped with %w. It is nil for ErrHelp and
+// ErrVersion.
+func (e *Error) Unwrap() error { return e.err }
 
 // ExitCode reports the process exit code appropriate for this failure:
 //

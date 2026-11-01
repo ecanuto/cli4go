@@ -1484,7 +1484,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{
-				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { return newError(2, "%s", sentinel) }},
+				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { return Errorf(2, "%s", sentinel) }},
 				&BoolOption{Flag: "-y", Dest: &later},
 			},
 		}
@@ -2802,7 +2802,7 @@ func TestCommand_Action(t *testing.T) {
 	})
 
 	t.Run("its error is what Parse returns", func(t *testing.T) {
-		want := newError(3, "boom")
+		want := Errorf(3, "boom")
 		app := newApp()
 		app.Commands[0].Action = func(c *Command) *Error { return want }
 		if err := app.Parse([]string{"serve"}); err != want {

@@ -280,11 +280,11 @@ func (c *Command) items(scope int) iter.Seq[item] {
 func (c *Command) Validate() *Error {
 	// Command.Name is required: usage, help, and version output use it.
 	if c.Name == "" {
-		return newError(1, "cli: Command.Name must not be empty")
+		return Errorf(1, "cli: Command.Name must not be empty")
 	}
 
 	if len(c.Commands) > 0 && len(c.Arguments) > 0 {
-		return newError(1, "cli: Command %q declares both Arguments and Commands", c.Name)
+		return Errorf(1, "cli: Command %q declares both Arguments and Commands", c.Name)
 	}
 	cmds := make(map[string]bool, len(c.Commands))
 	for _, sub := range c.Commands {
@@ -292,7 +292,7 @@ func (c *Command) Validate() *Error {
 			return err
 		}
 		if cmds[sub.Name] {
-			return newError(1, "cli: duplicate subcommand %q", sub.Name)
+			return Errorf(1, "cli: duplicate subcommand %q", sub.Name)
 		}
 		cmds[sub.Name] = true
 	}
@@ -308,12 +308,12 @@ func (c *Command) Validate() *Error {
 	names := make(map[string]bool)
 	for it := range c.items(withBuiltins) {
 		if err := it.Validate(); err != nil {
-			return newError(1, "%s", err)
+			return Errorf(1, "%s", err)
 		}
 
 		if env := it.GetEnv(); env != "" {
 			if envs[env] {
-				return newError(1, "cli: duplicate environment variable %q", env)
+				return Errorf(1, "cli: duplicate environment variable %q", env)
 			}
 			envs[env] = true
 		}
@@ -326,14 +326,14 @@ func (c *Command) Validate() *Error {
 		if opt, ok := it.(Option); ok {
 			if flag := opt.GetFlag(); flag != "" {
 				if forms[flag] {
-					return newError(1, "cli: duplicate option flag form %q", flag)
+					return Errorf(1, "cli: duplicate option flag form %q", flag)
 				}
 				forms[flag] = true
 			}
 
 			if long := opt.GetLong(); long != "" {
 				if forms[long] {
-					return newError(1, "cli: duplicate option long form %q", long)
+					return Errorf(1, "cli: duplicate option long form %q", long)
 				}
 				forms[long] = true
 			}
@@ -344,7 +344,7 @@ func (c *Command) Validate() *Error {
 		// Argument's; an explicit Name settles it.
 		name := it.GetName()
 		if names[name] {
-			return newError(1, "cli: duplicate name %q; set an explicit Name on one of them", name)
+			return Errorf(1, "cli: duplicate name %q; set an explicit Name on one of them", name)
 		}
 		names[name] = true
 	}
@@ -635,12 +635,13 @@ func (c *Command) ErrorString(err error) string {
 // The "f" suffix is what lets `go vet`'s printf checker recognize
 // format/args here and catch a mismatched verb.
 //
-// A caller holding a plain error can pass it through with "%s", err. A
+// A caller holding a plain error can pass it through with "%w", err, which
+// keeps it reachable through errors.Is and errors.As on the returned Error. A
 // user-declared Option's Action is such a caller; see OptionAction.
 func (c *Command) PrintErrorf(format string, args ...any) *Error {
 	err := fmt.Errorf(format, args...)
 	fmt.Fprint(c.stderr(), c.ErrorString(err))
-	return newError(2, "%s", err)
+	return Errorf(2, "%w", err)
 }
 
 // UsageString returns the one-line usage summary, e.g.

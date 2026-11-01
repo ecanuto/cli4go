@@ -2,10 +2,11 @@ package cli
 
 import (
 	"errors"
+	"io"
 	"testing"
 )
 
-func TestNewError(t *testing.T) {
+func TestErrorf(t *testing.T) {
 	tests := []struct {
 		name    string
 		code    int
@@ -30,7 +31,7 @@ func TestNewError(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := newError(tt.code, tt.format, tt.args...)
+			err := Errorf(tt.code, tt.format, tt.args...)
 			if got := err.Error(); got != tt.wantMsg {
 				t.Errorf("Error() = %q, want %q", got, tt.wantMsg)
 			}
@@ -38,6 +39,45 @@ func TestNewError(t *testing.T) {
 				t.Errorf("ExitCode() = %d, want %d", got, tt.code)
 			}
 		})
+	}
+}
+
+func TestErrorf_Wrap(t *testing.T) {
+	sentinel := errors.New("sentinel")
+	err := Errorf(3, "step failed: %w", sentinel)
+
+	if !errors.Is(err, sentinel) {
+		t.Error("errors.Is(err, sentinel) = false, want true")
+	}
+	if got, want := err.Error(), "step failed: sentinel"; got != want {
+		t.Errorf("Error() = %q, want %q", got, want)
+	}
+	if errors.Is(err, ErrExit) {
+		t.Error("errors.Is(err, ErrExit) = true for code 3, want false")
+	}
+}
+
+func TestErrorf_CodeZero(t *testing.T) {
+	err := Errorf(0, "done")
+
+	if !errors.Is(err, ErrExit) {
+		t.Error("errors.Is(err, ErrExit) = false for code 0, want true")
+	}
+	if got := err.ExitCode(); got != 0 {
+		t.Errorf("ExitCode() = %d, want 0", got)
+	}
+}
+
+func TestPrintErrorf_Wrap(t *testing.T) {
+	sentinel := errors.New("sentinel")
+	cmd := &Command{Name: "prog", Stderr: io.Discard}
+
+	err := cmd.PrintErrorf("bad thing: %w", sentinel)
+	if !errors.Is(err, sentinel) {
+		t.Error("errors.Is(err, sentinel) = false, want true")
+	}
+	if got := err.ExitCode(); got != 2 {
+		t.Errorf("ExitCode() = %d, want 2", got)
 	}
 }
 
@@ -62,13 +102,13 @@ func TestExitCode(t *testing.T) {
 		},
 		{
 			name:       "validate failure",
-			err:        newError(1, "cli: Command.Name must not be empty"),
+			err:        Errorf(1, "cli: Command.Name must not be empty"),
 			wantCode:   1,
 			wantIsExit: false,
 		},
 		{
 			name:       "usage error",
-			err:        newError(2, "unknown option %q", "--nope"),
+			err:        Errorf(2, "unknown option %q", "--nope"),
 			wantCode:   2,
 			wantIsExit: false,
 		},
