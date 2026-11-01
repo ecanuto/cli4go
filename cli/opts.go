@@ -229,7 +229,7 @@ type BoolOption = OptionOf[bool, boolParser]
 // OptionAction is a hook that runs when its Option's flag is seen on the
 // command line. Parse calls it as opt.GetAction()(c, opt, value): c is
 // the Command being parsed (so an Action can call c.PrintHelp,
-// c.PrintVersion, or c.PrintErrorf, as Parse itself does), opt is the
+// c.PrintVersion, or c.UsageErrorf, as Parse itself does), opt is the
 // matched Option (assert it to its concrete type, e.g.
 // opt.(*StringOption).Flag, to read its declared fields), and value is
 // the string Parse hands to the Option's Set method: the token consumed
@@ -247,8 +247,8 @@ type BoolOption = OptionOf[bool, boolParser]
 //	nil              -- parsing continues, as for an ordinary Option.
 //	a non-nil *Error -- parsing stops; Parse returns it unchanged.
 //
-// This is the contract PrintErrorf/ErrHelp/ErrVersion already follow:
-// an Action reports a usage error with `return c.PrintErrorf(...)`, and
+// This is the contract UsageErrorf/ErrHelp/ErrVersion already follow:
+// an Action reports a usage error with `return c.UsageErrorf(...)`, and
 // may return ErrHelp, ErrVersion, or any other *Error. It is how the
 // built-in -h/--help and -v/--version get their behavior (see options):
 // each is a *BoolOption with a throwaway Dest and an Action that prints

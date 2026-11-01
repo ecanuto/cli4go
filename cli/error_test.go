@@ -68,11 +68,11 @@ func TestErrorf_CodeZero(t *testing.T) {
 	}
 }
 
-func TestPrintErrorf_Wrap(t *testing.T) {
+func TestUsageErrorf_Wrap(t *testing.T) {
 	sentinel := errors.New("sentinel")
 	cmd := &Command{Name: "prog", Stderr: io.Discard}
 
-	err := cmd.PrintErrorf("bad thing: %w", sentinel)
+	err := cmd.UsageErrorf("bad thing: %w", sentinel)
 	if !errors.Is(err, sentinel) {
 		t.Error("errors.Is(err, sentinel) = false, want true")
 	}

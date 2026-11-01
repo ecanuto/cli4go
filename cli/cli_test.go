@@ -1002,7 +1002,7 @@ func TestParse(t *testing.T) {
 		if got, want := err.ExitCode(), 2; got != want {
 			t.Errorf("ExitCode() = %d, want %d", got, want)
 		}
-		if got, want := buf.String(), c.ErrorString(err); got != want {
+		if got, want := buf.String(), c.usageErrorString(err); got != want {
 			t.Errorf("Parse() wrote %q to Stderr, want %q", got, want)
 		}
 	})
@@ -1159,7 +1159,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		if want := `unknown option "--nope"`; err.Error() != want {
 			t.Errorf("Parse().Error() = %q, want %q", err.Error(), want)
 		}
-		if got, want := buf.String(), c.ErrorString(errors.New(`unknown option "--nope"`)); got != want {
+		if got, want := buf.String(), c.usageErrorString(errors.New(`unknown option "--nope"`)); got != want {
 			t.Errorf("Parse() wrote %q to Stderr, want %q", got, want)
 		}
 	})
@@ -1196,7 +1196,7 @@ func TestParse_TokenLoop(t *testing.T) {
 				if err.Error() != tt.want {
 					t.Errorf("Parse().Error() = %q, want %q", err.Error(), tt.want)
 				}
-				if got, want := buf.String(), c.ErrorString(errors.New(tt.want)); got != want {
+				if got, want := buf.String(), c.usageErrorString(errors.New(tt.want)); got != want {
 					t.Errorf("Parse() wrote %q to Stderr, want %q", got, want)
 				}
 			})
@@ -1656,7 +1656,7 @@ func TestDefaultParse(t *testing.T) {
 
 // --- Error output, Usage, Help, Version --------------------------------------
 
-func TestErrorString(t *testing.T) {
+func TestUsageErrorString(t *testing.T) {
 	tests := []struct {
 		name string
 		cmd  Command
@@ -1710,36 +1710,36 @@ func TestErrorString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			want := strings.Join(tt.want, "\n") + "\n"
 
-			if got := tt.cmd.ErrorString(tt.err); got != want {
-				t.Errorf("ErrorString() =\n%q\nwant\n%q", got, want)
+			if got := tt.cmd.usageErrorString(tt.err); got != want {
+				t.Errorf("usageErrorString() =\n%q\nwant\n%q", got, want)
 			}
 		})
 	}
 }
 
-// TestPrintErrorf checks the Stderr routing -- PrintErrorf must write
+// TestUsageErrorf checks the Stderr routing -- UsageErrorf must write
 // there even though every other Print* method (PrintUsage, PrintHelp,
 // PrintVersion) writes to Stdout instead -- the %w wrapping through
 // its internal fmt.Errorf, and the returned *Error: always
 // ExitCode() == 2, with a message equal to the formatted error's,
 // unprefixed (the "error: " prefix is display-only, added by
-// ErrorString).
-func TestPrintErrorf(t *testing.T) {
+// usageErrorString).
+func TestUsageErrorf(t *testing.T) {
 	var buf bytes.Buffer
 	c := &Command{Name: "myprogram", Stderr: &buf}
 	cause := errors.New("bad value")
 
-	got := c.PrintErrorf("invalid value %q: %w", "nope", cause)
+	got := c.UsageErrorf("invalid value %q: %w", "nope", cause)
 
 	wantMsg := `invalid value "nope": bad value`
-	if want := c.ErrorString(errors.New(wantMsg)); buf.String() != want {
-		t.Errorf("PrintErrorf() wrote %q, want %q", buf.String(), want)
+	if want := c.usageErrorString(errors.New(wantMsg)); buf.String() != want {
+		t.Errorf("UsageErrorf() wrote %q, want %q", buf.String(), want)
 	}
 	if got.ExitCode() != 2 {
-		t.Errorf("PrintErrorf().ExitCode() = %d, want 2", got.ExitCode())
+		t.Errorf("UsageErrorf().ExitCode() = %d, want 2", got.ExitCode())
 	}
 	if got.Error() != wantMsg {
-		t.Errorf("PrintErrorf().Error() = %q, want %q", got.Error(), wantMsg)
+		t.Errorf("UsageErrorf().Error() = %q, want %q", got.Error(), wantMsg)
 	}
 }
 

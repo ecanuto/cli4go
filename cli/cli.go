@@ -390,10 +390,10 @@ func (c *Command) Validate() *Error {
 //     c.Stderr before returning (see below) for everything except an
 //     Action's own *Error, which Parse returns exactly as given -- an
 //     Action that wants that same clap-style block builds it itself via
-//     c.PrintErrorf.
+//     c.UsageErrorf.
 //
 // For a real parsing/usage error Parse builds itself, Parse prints (via
-// PrintErrorf -- see its doc comment):
+// UsageErrorf -- see its doc comment):
 //
 //	error: <message>
 //	Usage: myprogram [options] [qux]
@@ -453,14 +453,14 @@ func (c *Command) Parse(args []string) *Error {
 
 			opt, ok := opts[key]
 			if !ok {
-				return c.PrintErrorf("unknown option %q", tok)
+				return c.UsageErrorf("unknown option %q", tok)
 			}
 
 			// An Option may appear at most once, whichever of its
 			// forms (Flag or Long) each occurrence uses; the error
 			// echoes the token that repeated it.
 			if seen[opt] {
-				return c.PrintErrorf("option %q cannot be used multiple times", tok)
+				return c.UsageErrorf("option %q cannot be used multiple times", tok)
 			}
 			seen[opt] = true
 
@@ -476,7 +476,7 @@ func (c *Command) Parse(args []string) *Error {
 				if _, ok := opt.(*BoolOption); !ok {
 					i++
 					if i >= len(args) {
-						return c.PrintErrorf("option %q requires a value", tok)
+						return c.UsageErrorf("option %q requires a value", tok)
 					}
 					value = args[i]
 				}
@@ -485,7 +485,7 @@ func (c *Command) Parse(args []string) *Error {
 			// Dest resolves first, if set: Action (below) receives the
 			// exact same value, and only runs at all if set succeeded.
 			if setErr := opt.Set(value); setErr != nil {
-				return c.PrintErrorf("option %q: %w", tok, setErr)
+				return c.UsageErrorf("option %q: %w", tok, setErr)
 			}
 
 			// See OptionAction for its nil/non-nil contract.
@@ -501,7 +501,7 @@ func (c *Command) Parse(args []string) *Error {
 			if len(c.Commands) > 0 {
 				idx := slices.IndexFunc(c.Commands, func(s *Command) bool { return s.Name == tok })
 				if idx < 0 {
-					return c.PrintErrorf("unknown command %q", tok)
+					return c.UsageErrorf("unknown command %q", tok)
 				}
 				if err := c.resolve(seen); err != nil {
 					return err
@@ -513,14 +513,14 @@ func (c *Command) Parse(args []string) *Error {
 			// A non-dash token fills the next declared Argument, in
 			// declaration order.
 			if argIndex >= len(c.Arguments) {
-				return c.PrintErrorf("unexpected argument %q", tok)
+				return c.UsageErrorf("unexpected argument %q", tok)
 			}
 			arg := c.Arguments[argIndex]
 			argIndex++
 			seen[arg] = true
 
 			if setErr := arg.Set(tok); setErr != nil {
-				return c.PrintErrorf("argument %q: %w", tok, setErr)
+				return c.UsageErrorf("argument %q: %w", tok, setErr)
 			}
 		}
 	}
@@ -530,7 +530,7 @@ func (c *Command) Parse(args []string) *Error {
 	}
 
 	if len(c.Commands) > 0 {
-		return c.PrintErrorf("a command is required")
+		return c.UsageErrorf("a command is required")
 	}
 
 	if c.Action != nil {
@@ -553,11 +553,11 @@ func (c *Command) resolve(seen map[item]bool) *Error {
 		// Env wins over Default, and exactly one of the two is applied,
 		// so each Dest is written at most once. A bad Env value is a
 		// real parsing/usage error (ExitCode() == 2), printed by
-		// PrintErrorf before it is returned.
+		// UsageErrorf before it is returned.
 		if name := it.GetEnv(); name != "" {
 			if val, ok := os.LookupEnv(name); ok {
 				if err := it.Set(val); err != nil {
-					return c.PrintErrorf("invalid value %q for environment variable %q: %w", val, name, err)
+					return c.UsageErrorf("invalid value %q for environment variable %q: %w", val, name, err)
 				}
 				continue
 			}
@@ -565,10 +565,10 @@ func (c *Command) resolve(seen map[item]bool) *Error {
 
 		// Neither the command line nor the environment supplied a value.
 		if it.GetRequired() {
-			return c.PrintErrorf("%q is required", it.GetName())
+			return c.UsageErrorf("%q is required", it.GetName())
 		}
 		if err := it.SetDefault(); err != nil {
-			return c.PrintErrorf("default value for %q: %w", it.GetName(), err)
+			return c.UsageErrorf("default value for %q: %w", it.GetName(), err)
 		}
 	}
 	return nil
@@ -600,7 +600,7 @@ func (c *Command) DefaultParse() *Error {
 
 // --- Error output, Usage, Help, Version --------------------------------------
 
-// ErrorString returns the clap-style error block for a real
+// usageErrorString returns the clap-style error block for a real
 // parsing/usage error: the "error: <message>" line, the usage line (see
 // UsageString), and a pointer to '--help'. Parse uses it for every real
 // parsing/usage error (ExitCode() == 2); see the Parse doc comment for
@@ -611,10 +611,7 @@ func (c *Command) DefaultParse() *Error {
 // in the *Error Parse returns is never prefixed with it, so
 // errors.Is/errors.As and any caller-side wrapping keep working against
 // the bare message.
-//
-// It is exported, like PrintUsage, as a standalone convenience for a
-// caller's own post-Parse validation that wants the same formatting.
-func (c *Command) ErrorString(err error) string {
+func (c *Command) usageErrorString(err error) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "error: %v\n", err)
 	b.WriteString(c.UsageString())
@@ -622,8 +619,8 @@ func (c *Command) ErrorString(err error) string {
 	return b.String()
 }
 
-// PrintErrorf formats err per format/args -- exactly like fmt.Errorf,
-// including %w to wrap an underlying error -- writes ErrorString of the
+// UsageErrorf formats err per format/args -- exactly like fmt.Errorf,
+// including %w to wrap an underlying error -- writes usageErrorString of the
 // result to c.Stderr (os.Stderr by default), and returns the *Error the
 // caller should return in turn. Unlike PrintUsage/PrintHelp/
 // PrintVersion, which write to Stdout and return nothing, it writes to
@@ -638,9 +635,9 @@ func (c *Command) ErrorString(err error) string {
 // A caller holding a plain error can pass it through with "%w", err, which
 // keeps it reachable through errors.Is and errors.As on the returned Error. A
 // user-declared Option's Action is such a caller; see OptionAction.
-func (c *Command) PrintErrorf(format string, args ...any) *Error {
+func (c *Command) UsageErrorf(format string, args ...any) *Error {
 	err := fmt.Errorf(format, args...)
-	fmt.Fprint(c.stderr(), c.ErrorString(err))
+	fmt.Fprint(c.stderr(), c.usageErrorString(err))
 	return Errorf(2, "%w", err)
 }
 

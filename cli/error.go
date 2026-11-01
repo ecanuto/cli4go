@@ -28,7 +28,7 @@ type Error struct {
 // formatted like fmt.Errorf. It prints nothing: it is for a caller (for
 // example an Action) that wants to return its own failure, with its own
 // exit code, and decide for itself how to report it. To print the
-// clap-style block as well, use Command.PrintErrorf.
+// clap-style block as well, use Command.UsageErrorf.
 //
 // A %w verb in format wraps an underlying error, which errors.Is and
 // errors.As then find through the returned Error. The code is not
