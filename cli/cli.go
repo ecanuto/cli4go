@@ -79,13 +79,19 @@ type Command struct {
 	// as an *Error (see CommandAction).
 	Action CommandAction
 
+	// Stdin is where an Action reads its input from. Nothing in this
+	// package reads it. Parse fills it when nil: from the parent
+	// Command, else os.Stdin.
+	Stdin io.Reader
+
 	// Stdout is where PrintUsage, PrintHelp, PrintVersion, and standalone
-	// help/version output write to. Defaults to os.Stdout when nil.
+	// help/version output write to. Parse fills it when nil: from the
+	// parent Command, else os.Stdout.
 	Stdout io.Writer
 
 	// Stderr is where Parse's clap-style error block (a real parsing
-	// error) writes to, always, independent of Stdout. Defaults to
-	// os.Stderr when nil.
+	// error) writes to, always, independent of Stdout. Parse fills it
+	// when nil: from the parent Command, else os.Stderr.
 	Stderr io.Writer
 
 	parent *Command
@@ -101,9 +107,33 @@ type Program = Command
 // the caller's main prints.
 type CommandAction func(c *Command) error
 
+// fillStreams sets every nil standard stream: from the parent, whose own
+// were already filled when its Parse got here, else from the os package.
+func (c *Command) fillStreams() {
+	var in io.Reader
+	var out, err io.Writer
+
+	if p := c.parent; p != nil {
+		in, out, err = p.Stdin, p.Stdout, p.Stderr
+	} else {
+		in, out, err = os.Stdin, os.Stdout, os.Stderr
+	}
+
+	if c.Stdin == nil {
+		c.Stdin = in
+	}
+	if c.Stdout == nil {
+		c.Stdout = out
+	}
+	if c.Stderr == nil {
+		c.Stderr = err
+	}
+}
+
 // stdout returns the Command's standard output stream, defaulting to
-// os.Stdout when Stdout is nil. Used by PrintUsage, PrintHelp, and
-// PrintVersion -- help/version output always goes here.
+// os.Stdout when Stdout is nil, so printing works before Parse too.
+// Used by PrintUsage, PrintHelp, and PrintVersion -- help/version output
+// always goes here.
 func (c *Command) stdout() io.Writer {
 	if c.Stdout != nil {
 		return c.Stdout
@@ -414,6 +444,7 @@ func (c *Command) Parse(args []string) *Error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
+	c.fillStreams()
 
 	// Lookup map built once so each token below resolves to its Option
 	// in O(1). Built from options(), not c.Options, so the built-in

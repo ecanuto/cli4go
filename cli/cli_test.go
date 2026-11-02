@@ -127,6 +127,69 @@ func TestStdout(t *testing.T) {
 	}
 }
 
+func TestParse_Streams(t *testing.T) {
+	t.Run("a nil stream is filled from the os package", func(t *testing.T) {
+		c := &Command{Name: "app"}
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if c.Stdin != os.Stdin || c.Stdout != os.Stdout || c.Stderr != os.Stderr {
+			t.Errorf("streams = %v, %v, %v, want the os streams", c.Stdin, c.Stdout, c.Stderr)
+		}
+	})
+
+	t.Run("a stream already set is kept", func(t *testing.T) {
+		in, out := strings.NewReader("x"), &bytes.Buffer{}
+		c := &Command{Name: "app", Stdin: in, Stdout: out}
+		if err := c.Parse(nil); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if c.Stdin != io.Reader(in) || c.Stdout != io.Writer(out) {
+			t.Errorf("Parse() replaced a stream that was set")
+		}
+	})
+
+	t.Run("a subcommand inherits and an Action sees them", func(t *testing.T) {
+		var out bytes.Buffer
+		var got string
+		app := &Command{
+			Name:   "app",
+			Stdin:  strings.NewReader("hello"),
+			Stdout: &out,
+			Commands: []*Command{{
+				Name: "run",
+				Action: func(c *Command) error {
+					b, _ := io.ReadAll(c.Stdin)
+					got = string(b)
+					fmt.Fprint(c.Stdout, "done")
+					return nil
+				},
+			}},
+		}
+		if err := app.Parse([]string{"run"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if got != "hello" || out.String() != "done" {
+			t.Errorf("Action read %q and wrote %q, want %q and %q", got, out.String(), "hello", "done")
+		}
+	})
+
+	t.Run("a subcommand's own stream wins over its parent's", func(t *testing.T) {
+		var parent, child bytes.Buffer
+		app := &Command{
+			Name:     "app",
+			Stdout:   &parent,
+			Commands: []*Command{{Name: "run", Stdout: &child}},
+		}
+		if err := app.Parse([]string{"run"}); err != nil {
+			t.Fatalf("Parse() = %v, want nil", err)
+		}
+		if app.Commands[0].Stdout != io.Writer(&child) {
+			t.Errorf("subcommand Stdout was replaced by the parent's")
+		}
+	})
+}
+
 func TestStderr(t *testing.T) {
 	tests := []struct {
 		input io.Writer
