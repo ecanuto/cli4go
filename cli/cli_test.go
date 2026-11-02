@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"slices"
@@ -2751,7 +2752,7 @@ func TestParse_Commands(t *testing.T) {
 func TestCommand_Action(t *testing.T) {
 	var ran []string
 	record := func(name string) CommandAction {
-		return func(c *Command) *Error {
+		return func(c *Command) error {
 			ran = append(ran, name)
 			return nil
 		}
@@ -2804,9 +2805,27 @@ func TestCommand_Action(t *testing.T) {
 	t.Run("its error is what Parse returns", func(t *testing.T) {
 		want := Errorf(3, "boom")
 		app := newApp()
-		app.Commands[0].Action = func(c *Command) *Error { return want }
+		app.Commands[0].Action = func(c *Command) error { return want }
 		if err := app.Parse([]string{"serve"}); err != want {
 			t.Errorf("Parse() = %v, want %v", err, want)
+		}
+	})
+
+	t.Run("a plain error becomes an Error with exit code 1", func(t *testing.T) {
+		cause := errors.New("boom")
+		app := newApp()
+		app.Commands[0].Action = func(c *Command) error { return cause }
+		err := app.Parse([]string{"serve"})
+		if err == nil || err.ExitCode() != 1 || errors.Is(err, ErrExit) || !errors.Is(err, cause) {
+			t.Errorf("Parse() = %v (code %d), want code 1, printable, wrapping cause", err, err.ExitCode())
+		}
+	})
+
+	t.Run("a wrapped Error keeps its exit code", func(t *testing.T) {
+		app := newApp()
+		app.Commands[0].Action = func(c *Command) error { return fmt.Errorf("serve: %w", Errorf(3, "boom")) }
+		if err := app.Parse([]string{"serve"}); err == nil || err.ExitCode() != 3 {
+			t.Errorf("Parse() = %v, want exit code 3", err)
 		}
 	})
 }

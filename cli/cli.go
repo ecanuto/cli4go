@@ -94,8 +94,11 @@ type Command struct {
 type Program = Command
 
 // CommandAction runs when its Command is selected and parsed: c is that
-// Command, with every item resolved.
-type CommandAction func(c *Command) *Error
+// Command, with every item resolved. A non-nil error stops Parse, which
+// returns it as an *Error: one built with Errorf or UsageErrorf keeps its
+// exit code, and any other error becomes an Error with exit code 1 that
+// the caller's main prints.
+type CommandAction func(c *Command) error
 
 // stdout returns the Command's standard output stream, defaulting to
 // os.Stdout when Stdout is nil. Used by PrintUsage, PrintHelp, and
@@ -536,7 +539,7 @@ func (c *Command) Parse(args []string) *Error {
 	}
 
 	if c.Action != nil {
-		return c.Action(c)
+		return fromError(c.Action(c))
 	}
 	return nil
 }

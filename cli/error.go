@@ -55,6 +55,20 @@ func Errorf(code int, format string, args ...any) *Error {
 	return newError(code, false, fmt.Errorf(format, args...))
 }
 
+// fromError converts the error an Action returned into the *Error Parse
+// returns. A nil err stays nil, an *Error found in the chain is returned
+// as is, and anything else becomes an Error with exit code 1.
+func fromError(err error) *Error {
+	if err == nil {
+		return nil
+	}
+	var e *Error
+	if errors.As(err, &e) && e != nil {
+		return e
+	}
+	return newError(1, false, err)
+}
+
 func (e *Error) Error() string { return e.err.Error() }
 
 // Unwrap returns the error built from Errorf's format, so errors.Is and
