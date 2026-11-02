@@ -166,7 +166,7 @@ func TestOptions(t *testing.T) {
 	// A placeholder Action, used only to mark a "want" Option as
 	// carrying one -- optionSlicesEqual compares Action by nil-ness,
 	// not identity, so any non-nil func here works.
-	anyAction := func(*Command, Option, string) *Error { return nil }
+	anyAction := func(*Command, Option, string) error { return nil }
 	var discard bool
 	anyDest := &discard
 
@@ -373,7 +373,7 @@ func TestOptions(t *testing.T) {
 }
 
 func TestOptions_StopsEarly(t *testing.T) {
-	anyAction := func(*Command, Option, string) *Error { return nil }
+	anyAction := func(*Command, Option, string) error { return nil }
 	var discard bool
 	anyDest := &discard
 
@@ -588,14 +588,14 @@ func TestValidate(t *testing.T) {
 			name: "valid, Option with Action instead of Dest",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{&StringOption{Flag: "-f", Action: func(*Command, Option, string) *Error { return nil }}},
+				Options: []Option{&StringOption{Flag: "-f", Action: func(*Command, Option, string) error { return nil }}},
 			},
 		},
 		{
 			name: "valid, Option with both Dest and Action",
 			cmd: Command{
 				Name:    "myprogram",
-				Options: []Option{&StringOption{Flag: "-f", Dest: &s, Action: func(*Command, Option, string) *Error { return nil }}},
+				Options: []Option{&StringOption{Flag: "-f", Dest: &s, Action: func(*Command, Option, string) error { return nil }}},
 			},
 		},
 		{
@@ -1054,7 +1054,7 @@ func TestParse_TokenLoop(t *testing.T) {
 				Flag: "-h", Long: "--help", Help: "Custom help",
 				// A BoolOption never consumes the next token as its value.
 				Dest: &custom,
-				Action: func(c *Command, opt Option, value string) *Error {
+				Action: func(c *Command, opt Option, value string) error {
 					ran = true
 					return nil
 				},
@@ -1429,7 +1429,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Options: []Option{
 				&StringOption{
 					Flag: "-x", Long: "--extra",
-					Action: func(c *Command, opt Option, value string) *Error {
+					Action: func(c *Command, opt Option, value string) error {
 						ran = true
 						seen = opt
 						seenValue = value
@@ -1460,7 +1460,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{
-				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { ran = true; seenValue = value; return nil }},
+				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) error { ran = true; seenValue = value; return nil }},
 			},
 			Arguments: []Argument{&StringArgument{Name: "qux", Dest: &qux}},
 		}
@@ -1485,7 +1485,7 @@ func TestParse_TokenLoop(t *testing.T) {
 		c := &Command{
 			Name: "myprogram",
 			Options: []Option{
-				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) *Error { return Errorf(2, "%s", sentinel) }},
+				&StringOption{Flag: "-x", Action: func(c *Command, opt Option, value string) error { return Errorf(2, "%s", sentinel) }},
 				&BoolOption{Flag: "-y", Dest: &later},
 			},
 		}
@@ -1509,7 +1509,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name: "myprogram",
 			Options: []Option{&StringOption{
 				Flag: "-b", Dest: &bar,
-				Action: func(c *Command, opt Option, value string) *Error {
+				Action: func(c *Command, opt Option, value string) error {
 					seenViaAction = value
 					return nil
 				},
@@ -1534,7 +1534,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name: "myprogram",
 			Options: []Option{&BoolOption{
 				Flag: "-f", Dest: &foo,
-				Action: func(c *Command, opt Option, value string) *Error {
+				Action: func(c *Command, opt Option, value string) error {
 					seenViaAction = value
 					return nil
 				},
@@ -1558,7 +1558,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name: "myprogram",
 			Options: []Option{&StringOption{
 				Flag: "-x",
-				Action: func(c *Command, opt Option, value string) *Error {
+				Action: func(c *Command, opt Option, value string) error {
 					seenValue = value
 					return nil
 				},
@@ -1582,7 +1582,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Options: []Option{&BoolOption{
 				Flag: "-x",
 				Dest: &triggered,
-				Action: func(c *Command, opt Option, value string) *Error {
+				Action: func(c *Command, opt Option, value string) error {
 					seenValue = value
 					return nil
 				},
@@ -1611,7 +1611,7 @@ func TestParse_TokenLoop(t *testing.T) {
 			Name: "myprogram",
 			Options: []Option{&IntOption{
 				Flag: "-n", Dest: &n,
-				Action: func(c *Command, opt Option, value string) *Error { ran = true; return nil },
+				Action: func(c *Command, opt Option, value string) error { ran = true; return nil },
 			}},
 			Stderr: &bytes.Buffer{},
 		}

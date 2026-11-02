@@ -244,14 +244,16 @@ type BoolOption = OptionOf[bool, boolParser]
 //
 // An Action's return value tells Parse whether to keep going:
 //
-//	nil              -- parsing continues, as for an ordinary Option.
-//	a non-nil *Error -- parsing stops; Parse returns it unchanged.
+//	nil            -- parsing continues, as for an ordinary Option.
+//	a non-nil error -- parsing stops; Parse returns it as an *Error.
 //
-// This is the contract UsageErrorf/ErrHelp/ErrVersion already follow:
-// an Action reports a usage error with `return c.UsageErrorf(...)`, and
-// may return ErrHelp, ErrVersion, or any other *Error. It is how the
+// An *Error (from Errorf or UsageErrorf, or ErrHelp/ErrVersion) is
+// returned unchanged, keeping its exit code, even when wrapped with %w;
+// any other error becomes an Error with exit code 1 that the caller
+// prints. An Action reports a usage error with
+// `return c.UsageErrorf(...)`. It is how the
 // built-in -h/--help and -v/--version get their behavior (see options):
 // each is a *BoolOption with a throwaway Dest and an Action that prints
 // and returns ErrHelp/ErrVersion. A user-declared Option can do the
 // same, with no special status for the built-ins.
-type OptionAction func(c *Command, opt Option, value string) *Error
+type OptionAction func(c *Command, opt Option, value string) error

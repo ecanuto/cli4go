@@ -75,7 +75,8 @@ type Command struct {
 
 	// Action, if set, runs at the end of a successful Parse when this
 	// Command is the one selected: a subcommand, or a Command without
-	// Commands. A non-nil *Error it returns is what Parse returns.
+	// Commands. A non-nil error it returns is what Parse returns,
+	// as an *Error (see CommandAction).
 	Action CommandAction
 
 	// Stdout is where PrintUsage, PrintHelp, PrintVersion, and standalone
@@ -170,7 +171,7 @@ func (c *Command) options() iter.Seq[Option] {
 			if !yield(&BoolOption{
 				Flag: "-h", Long: "--help", Help: "Print help",
 				Dest: &discard,
-				Action: func(c *Command, opt Option, value string) *Error {
+				Action: func(c *Command, opt Option, value string) error {
 					c.PrintHelp()
 					return ErrHelp
 				},
@@ -199,7 +200,7 @@ func (c *Command) options() iter.Seq[Option] {
 			yield(&BoolOption{
 				Flag: short, Long: "--version", Help: "Print version",
 				Dest: &discard,
-				Action: func(c *Command, opt Option, value string) *Error {
+				Action: func(c *Command, opt Option, value string) error {
 					c.PrintVersion()
 					return ErrVersion
 				},
@@ -388,14 +389,13 @@ func (c *Command) Validate() *Error {
 //     printed, and errors.Is(err, ErrExit) is false: the caller prints it.
 //   - a real parsing/usage error (ExitCode() == 2): an unknown, invalid,
 //     repeated, or missing-but-Required option/argument, including a
-//     bad Env value, or whatever *Error a caller-declared Option's
-//     Action chose to return. Parse prints a clap-style block to
-//     c.Stderr before returning (see below) for everything except an
-//     Action's own *Error, which Parse returns exactly as given -- an
-//     Action that wants that same clap-style block builds it itself via
-//     c.UsageErrorf. errors.Is(err, ErrExit) is true for what Parse
-//     printed, and false for an Action's *Error built with Errorf, which
-//     the caller prints.
+//     bad Env value. Parse prints a clap-style block to c.Stderr before
+//     returning (see below) for everything except an Action's own
+//     error, which Parse returns as an *Error (see CommandAction and
+//     OptionAction) -- an Action that wants that same clap-style block
+//     builds it itself via c.UsageErrorf. errors.Is(err, ErrExit) is
+//     true for what Parse printed, and false for an Action's error
+//     built with Errorf or returned plain, which the caller prints.
 //
 // For a real parsing/usage error Parse builds itself, Parse prints (via
 // UsageErrorf -- see its doc comment):
@@ -496,7 +496,7 @@ func (c *Command) Parse(args []string) *Error {
 			// See OptionAction for its nil/non-nil contract.
 			if action := opt.GetAction(); action != nil {
 				if err := action(c, opt, value); err != nil {
-					return err
+					return fromError(err)
 				}
 			}
 
